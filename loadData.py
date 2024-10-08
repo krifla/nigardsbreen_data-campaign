@@ -58,7 +58,7 @@ def direction_avg(D0:'np array') -> float:
 # HOBO weather station @ inlet
 # --------------------------------------------------------------------
 
-path = 'AWS/'
+path = 'data/AWS/'
 filename = 'HOBO.csv'
 url = 'https://www.hobolink.com/p/4717965e3ebf930f87fbbfbe870a4c37#'
 file = path+filename
@@ -132,7 +132,7 @@ FF.loc[FF['hour']!=6, 'PREC_day'] = np.nan
 # PROMICE weather station @ glacier
 # --------------------------------------------------------------------
 
-path = 'AWS/'
+path = 'data/AWS/'
 filename = 'NB_hour.csv'
 url = 'https://thredds.geus.dk/thredds/fileServer/aws_l3_station_csv/level_3/UWN/UWN_hour.csv'
 file = path+filename
@@ -156,7 +156,7 @@ rotation_offset = [np.nan, 60]
 # MET weather station @ valley1 (MG) and mountain (SB)
 # --------------------------------------------------------------------
 
-path = 'AWS/'
+path = 'data/AWS/'
 filename = 'MG_hour.csv'
 cols = pd.read_csv(path+filename, sep=';', nrows=1).columns
 MG = pd.read_csv(path+filename, sep=';', decimal=',', na_values='-', usecols=cols[2:])
@@ -176,7 +176,7 @@ MG['PREC_day'] = MG['PREC'].rolling(min_periods=24, window=24).sum()
 # only keep daily values at the start of each day to avoid confusion
 MG.loc[MG['hour']!=6, 'PREC_day'] = np.nan
 
-path = 'AWS/'
+path = 'data/AWS/'
 filename = 'SB_hour.csv'
 cols = pd.read_csv(path+filename, sep=';', nrows=1).columns
 SB = pd.read_csv(path+filename, sep=';', decimal=',', na_values='-', usecols=cols[2:])
@@ -189,6 +189,8 @@ SB['date'] += pd.Timedelta(hours=1) # convert to local summer time
 # --------------------------------------------------------------------
 # Statkraft weather station @ valley2 (BH) and outlet (NV)
 # --------------------------------------------------------------------
+
+path = 'data/AWS/'
 
 # data from Steinmannen
 #filename = 'SM.xlsx'
@@ -266,7 +268,7 @@ NV['date'] = pd.to_datetime(NV['date'])
 
 dask.config.set({'array.slicing.split_large_chunks': True})
 
-path = 'lidar/'
+path = 'data/lidar/'
 lidar = xr.open_mfdataset(path+'VAD_149_70_v04_2023091*')#,engine='netcdf4')
 lidar['time'] = lidar['time'] + np.timedelta64(2,'h')
 
@@ -283,7 +285,7 @@ lidar_wd = (lidar_wd%360)
 # Radiosonde data
 # --------------------------------------------------------------------
 
-path = 'radiosonde/'
+path = 'data/radiosonde/'
 filename = 'balloon2_profile_230912_1313.txt'#balloon2
 date = filename[17:23]
 #cols = pd.read_csv(path+filename, sep='\tab', nrows=1).columns
@@ -346,7 +348,7 @@ RS4['pt'] = (RS4['t']+273.15)*(1013/RS4['p'])**(0.286)
 # iMet data
 # --------------------------------------------------------------------
 
-path = 'UAV/iMet/'
+path = 'data/UAV/iMet/'
 extension = 'csv'
 
 fns = glob.glob(path+'*.{}'.format(extension))
@@ -383,7 +385,7 @@ for fn in fns:#['20230914-193303-00061169.csv','20230915-141957-00065717.csv']:#
 # UAV wind data
 # --------------------------------------------------------------------
 
-path = 'UAV/wind_profiles/'
+path = 'data/UAV/wind_profiles/'
 extension = 'csv'
 
 fns = glob.glob(path+'*.{}'.format(extension))
@@ -416,7 +418,7 @@ for fn in fns:
 global ttFF, ttFF_lon, ttFF_lat, ttFF_hordist
 
 # read tinytag data from forefield
-path = 'tinytags/FF/'
+path = 'data/tinytags/FF/'
 extension = '.xlsx'
 fns = glob.glob(path+'*{}'.format(extension))
 
@@ -427,7 +429,7 @@ for fn in sorted(fns)[:]:
     ttFF['t_'+fn[12:15]] = tt[1]
 
 # read tinytag data from glacier
-path = 'tinytags/NB/'
+path = 'data/tinytags/NB/'
 extension = '.xlsx'
 fns = glob.glob(path+'*{}'.format(extension))
 
@@ -440,7 +442,7 @@ for fn in sorted(fns)[:]:
     ttNB['t_'+fn[12:15]] = tt[1]
 
 # read tinytag data from paraglider
-path = 'paraglider/'
+path = 'data/paraglider/'
 extension = '.xlsx'
 tt = pd.DataFrame(pd.read_excel(path+'hauganosi_temp'+extension)[['Time adjusted to phone time',1,'interpolated altitude']][4:])
 tt = tt.rename({'Time adjusted to phone time': 'date', 1: 'temperature', 'interpolated altitude': 'altitude'}, axis='columns')
@@ -460,16 +462,18 @@ ttFF_lat = ([61.658663686221225, 61.663632058887295, 61.66757985115699, 61.66953
 # Humilog data
 # --------------------------------------------------------------------
 
-fn = 'humilog/DK320PDM-22176 25.09.23 10-11-15.ASC'
-humilog_lower = pd.read_csv(fn, sep='\t', decimal=',', skiprows=5, header=None, encoding='latin-1') #r'\s{2,}'
+path = 'data/humilog/'
+
+fn = 'DK320PDM-22176 25.09.23 10-11-15.ASC'
+humilog_lower = pd.read_csv(path+fn, sep='\t', decimal=',', skiprows=5, header=None, encoding='latin-1') #r'\s{2,}'
 humilog_lower['date'] = pd.to_datetime(humilog_lower[0]+' '+humilog_lower[1], format='%d.%m.%y %H:%M:%S')
 #humilog_lower['date'] += pd.Timedelta(hours=2) # convert to local summer time
 del humilog_lower[0],humilog_lower[1],humilog_lower[4]
 humilog_lower = humilog_lower.rename(columns={2: 'T', 3: 'RH'})
 humilog_lower = humilog_lower.loc[np.where(humilog_lower['date'] >= pd.Timestamp('2023-09-12 18:00:00'))[0][0]:np.where(humilog_lower['date'] >= pd.Timestamp('2023-09-15 14:00:00'))[0][0]].reset_index(drop=True)
 
-fn = 'humilog/DK320PDM-22731 29.09.23 12-47-04.ASC'
-humilog_upper = pd.read_csv(fn, sep='\t', decimal=',', skiprows=5, header=None, encoding='latin-1') #r'\s{2,}'
+fn = 'DK320PDM-22731 29.09.23 12-47-04.ASC'
+humilog_upper = pd.read_csv(path+fn, sep='\t', decimal=',', skiprows=5, header=None, encoding='latin-1') #r'\s{2,}'
 humilog_upper['date'] = pd.to_datetime(humilog_upper[0]+' '+humilog_upper[1], format='%d.%m.%y %H:%M:%S')
 #humilog_upper['date'] += pd.Timedelta(hours=2) # convert to local summer time
 del humilog_upper[0],humilog_upper[1],humilog_upper[4]
