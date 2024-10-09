@@ -563,7 +563,7 @@ def plotVerticalWindProfiles():
 
 # wind rose ----------------------------------------------------------
 
-#im = plt.imread('map/2022-08-31-00_00_2022-08-31-23_59_Sentinel-2_L1C_True_color_Jostedalen.png')
+#im = plt.imread('data/map/2022-08-31-00_00_2022-08-31-23_59_Sentinel-2_L1C_True_color_Jostedalen.png')
 #
 #xmin=7.140083
 #xmax=7.422981
