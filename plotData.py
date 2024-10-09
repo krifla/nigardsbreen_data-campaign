@@ -6,6 +6,17 @@ from datetime import datetime, timedelta
 import matplotlib.dates as mdates
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, zoomed_inset_axes
 from pyproj import Transformer
+from shapely.geometry import Point, LineString
+import rasterio
+from rasterio.transform import rowcol
+import ast
+from pyproj import Geod
+from scipy.ndimage import gaussian_filter
+import matplotlib.gridspec as gridspec
+from scipy import interpolate
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+from matplotlib.markers import MarkerStyle
 
 # CONTENTS
 
@@ -13,7 +24,11 @@ from pyproj import Transformer
 # plot map
 # plot wind
 # plot temperature
-
+# plot humidity
+# plot pressure
+# plot radiation
+# plot precipitation
+# interpolate and plot UAV data
 
 
 #start = pd.Timestamp('2023-09-11 00:00:00')
@@ -37,12 +52,12 @@ def plotMap():
    
     # load map data
     
-    terrain = gpd.read_file('map/Basisdata_4644_Luster_25833_N50Hoyde_GML.gml', layer='Høydekurve')
-    lakes = gpd.read_file('map/Basisdata_4644_Luster_25833_N50Arealdekke_GML.gml', layer='Innsjø')
+    terrain = gpd.read_file('data/map/Basisdata_4644_Luster_25833_N50Hoyde_GML.gml', layer='Høydekurve')
+    lakes = gpd.read_file('data/map/Basisdata_4644_Luster_25833_N50Arealdekke_GML.gml', layer='Innsjø')
     lakes = lakes.loc[(~np.isnan(lakes['vatnLøpenummer']))&(lakes['høyde']>200)&(lakes['høyde']<400)]
-    glaciers = gpd.read_file('map/Basisdata_4644_Luster_25833_N50Arealdekke_GML.gml', layer='SnøIsbre')
-    rivers = gpd.read_file('map/Basisdata_4644_Luster_25833_N50Arealdekke_GML.gml', layer='Elv')
-    #labels = gpd.read_file('map/Basisdata_4644_Luster_25833_N50Stedsnavn_GML.gml')
+    glaciers = gpd.read_file('data/map/Basisdata_4644_Luster_25833_N50Arealdekke_GML.gml', layer='SnøIsbre')
+    rivers = gpd.read_file('data/map/Basisdata_4644_Luster_25833_N50Arealdekke_GML.gml', layer='Elv')
+    #labels = gpd.read_file('data/map/Basisdata_4644_Luster_25833_N50Stedsnavn_GML.gml')
     
     terrain_100 = terrain[terrain['høyde'] % 100 == 0]
     terrain_500 = terrain[terrain['høyde'] % 500 == 0]
@@ -51,7 +66,7 @@ def plotMap():
     terrain_glaciers_100 = terrain_100.intersection(glaciers_buffered.unary_union)
     terrain_glaciers_500 = terrain_500.intersection(glaciers_buffered.unary_union)
     
-    world = gpd.read_file('map/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp')
+    world = gpd.read_file('data/map/ne_50m_admin_0_countries/ne_50m_admin_0_countries.shp')
     norway = world[world['ADMIN'] == 'Norway']
     
     # create map
@@ -312,31 +327,31 @@ def plotVerticalWindProfiles():
     colours = [c[9],c[7],c[1],c[6]]
     for i,h in enumerate(['07','12','15','18']):
         for j,loc in enumerate(['NB', 'front', 'FF', 'NV']):
-            height = np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/height_{loc}.npy')-100
-            mask = (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_13-{h}.npy') > 270) & \
-            (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy') > 1)
+            height = np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/height_{loc}.npy')-100
+            mask = (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_13-{h}.npy') > 270) & \
+            (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy') > 1)
             if loc == 'FF' or loc == 'NV':
-                mask = (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_13-{h}.npy') > 247.5) & \
-                (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_13-{h}.npy') < 337.5) & \
-                (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy') > 1)
-            axes[0,i].plot(np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy'), 
+                mask = (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_13-{h}.npy') > 247.5) & \
+                (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_13-{h}.npy') < 337.5) & \
+                (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy') > 1)
+            axes[0,i].plot(np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy'), 
                            height, lw=3, c=colours[j], alpha=alpha)
-            axes[0,i].scatter(np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy')[mask], 
+            axes[0,i].scatter(np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy')[mask], 
                               height[mask], marker='o', lw=1.5, c='none', ec=colours[j])
-            axes[0,i].scatter(np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy')[~mask], 
+            axes[0,i].scatter(np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_13-{h}.npy')[~mask], 
                               height[~mask], marker='o', lw=1.5, c='none', ec=colours[j], alpha=alpha)
             if h != '18':
-                mask = (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_14-{h}.npy') > 270) & \
-                (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy') > 1)
+                mask = (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_14-{h}.npy') > 270) & \
+                (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy') > 1)
                 if loc == 'FF' or loc == 'NV':
-                    mask = (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_14-{h}.npy') > 247.5) & \
-                    (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_14-{h}.npy') < 337.5) & \
-                    (np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy') > 1)
-                axes[1,i].plot(np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy'), 
+                    mask = (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_14-{h}.npy') > 247.5) & \
+                    (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/wd_{loc}_14-{h}.npy') < 337.5) & \
+                    (np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy') > 1)
+                axes[1,i].plot(np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy'), 
                                height, lw=3, c=colours[j], alpha=alpha)
-                axes[1,i].scatter(np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy')[mask], 
+                axes[1,i].scatter(np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy')[mask], 
                                   height[mask], marker='o', lw=1.5, c='none', ec=colours[j])
-                axes[1,i].scatter(np.load(f'wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy')[~mask], 
+                axes[1,i].scatter(np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/ws_{loc}_14-{h}.npy')[~mask], 
                                   height[~mask], marker='o', lw=1.5, c='none', ec=colours[j], alpha=alpha)
     
     
@@ -351,7 +366,7 @@ def plotVerticalWindProfiles():
             for ws, wd, z in zip(uav_wind[p]['Wind Speed'], uav_wind[p]['Wind Direction'], uav_wind[p]['Altitude']):
                 if 270 < wd < 360 and ws > 0.5:
                     axes[j,i].plot(ws, z, 'o', c=c[9])
-                    print ('glac', p, ws, z)
+                    #print ('glac', p, ws, z)
                 else:
                     axes[j,i].plot(ws, z, 'o', c=c[9], alpha=alpha)
         for i,p in enumerate(prof_front[j]):
@@ -445,11 +460,13 @@ def plotVerticalWindProfiles():
     
     # AWS
     for i,h in enumerate([7,12,15,18]):
-        if 270 <= SB.loc[SB['date']==datetime(2023,9,13,h,0,0),'WD'].values[0] <= 360 and SB.loc[SB['date']==datetime(2023,9,13,h,0,0),'WS'].values[0] > 0.5:
+        if 270 <= SB.loc[SB['date']==datetime(2023,9,13,h,0,0),'WD'].values[0] <= 360 and \
+        SB.loc[SB['date']==datetime(2023,9,13,h,0,0),'WS'].values[0] > 0.5:
             axes[0,i].plot(SB.loc[SB['date']==datetime(2023,9,13,h,0,0),'WS'], 1566, '^', c='k', ms=ms*4)
         else:
             axes[0,i].plot(SB.loc[SB['date']==datetime(2023,9,13,h,0,0),'WS'], 1566, '^', c='k', ms=ms*4, alpha=alpha*3)
-        if 270 <= NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wdir_u'].values[0] <= 360 and NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wspd_u'].values[0] > 0.5:
+        if 270 <= NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wdir_u'].values[0] <= 360 and \
+        NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wspd_u'].values[0] > 0.5:
             #for ax in axes[0, :]:
             #    ax.plot(NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wspd_u'], 550, 'X', c=c[9], ms=ms*4, alpha=alpha*1.5)
             axes[0,i].plot(NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wspd_u'], 550, '^', c=c[9], ms=ms*4)
@@ -457,7 +474,8 @@ def plotVerticalWindProfiles():
             #for ax in axes[0, :]:
             #    ax.plot(NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wspd_u'], 550, 'x', c=c[9], ms=ms*4, alpha=alpha*1.5)
             axes[0,i].plot(NB.loc[NB['date']==datetime(2023,9,13,h-1,30,0),'wspd_u'], 550, '^', c=c[9], ms=ms*4, alpha=alpha*1.5)
-        if 247.5 <= FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WD'].values[0] <= 337.5 and FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WS'].values[0] > 0.5:
+        if 247.5 <= FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WD'].values[0] <= 337.5 and \
+        FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WS'].values[0] > 0.5:
             #for ax in axes[0, :]:
             #    ax.plot(FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WS'], 277, 'X', c=c[1], ms=ms*4, alpha=alpha*1.5)
             axes[0,i].plot(FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WS'], 277, '^', c=c[1], ms=ms*4)
@@ -466,11 +484,13 @@ def plotVerticalWindProfiles():
             #    ax.plot(FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WS'], 277, 'x', c=c[1], ms=ms*4, alpha=alpha*1.5)
             axes[0,i].plot(FF.loc[FF['date']==datetime(2023,9,13,h,0,0),'WS'], 277, '^', c=c[1], ms=ms*4, alpha=alpha*1.5)
     for i,h in enumerate([7,12,15]):
-        if 270 <= SB.loc[SB['date']==datetime(2023,9,14,h,0,0),'WD'].values[0] <= 360 and SB.loc[SB['date']==datetime(2023,9,14,h,0,0),'WS'].values[0] > 0.5:
+        if 270 <= SB.loc[SB['date']==datetime(2023,9,14,h,0,0),'WD'].values[0] <= 360 and \
+        SB.loc[SB['date']==datetime(2023,9,14,h,0,0),'WS'].values[0] > 0.5:
             axes[1,i].plot(SB.loc[SB['date']==datetime(2023,9,14,h,0,0),'WS'], 1566, '^', c='k', ms=ms*4)
         else:
             axes[1,i].plot(SB.loc[SB['date']==datetime(2023,9,14,h,0,0),'WS'], 1566, '^', c='k', ms=ms*4, alpha=alpha*3)
-        if 270 <= NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wdir_u'].values[0] <= 360 and NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wspd_u'].values[0] > 0.5:
+        if 270 <= NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wdir_u'].values[0] <= 360 and \
+        NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wspd_u'].values[0] > 0.5:
             #for ax in axes[1, :]:
             #    ax.plot(NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wspd_u'], 550, 'X', c=c[9], ms=ms*4, alpha=alpha*1.5)
             axes[1,i].plot(NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wspd_u'], 550, '^', c=c[9], ms=ms*4)
@@ -478,7 +498,8 @@ def plotVerticalWindProfiles():
             #for ax in axes[1, :]:
             #    ax.plot(NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wspd_u'], 550, 'x', c=c[9], ms=ms*4, alpha=alpha*1.5)
             axes[1,i].plot(NB.loc[NB['date']==datetime(2023,9,14,h-1,30,0),'wspd_u'], 550, '^', c=c[9], ms=ms*4, alpha=alpha*1.5)
-        if 247.5 <= FF.loc[FF['date']==datetime(2023,9,14,h,0,0),'WD'].values[0] <= 337.5 and FF.loc[FF['date']==datetime(2023,9,14,h,0,0),'WS'].values[0] > 0.5:
+        if 247.5 <= FF.loc[FF['date']==datetime(2023,9,14,h,0,0),'WD'].values[0] <= 337.5 and \
+        FF.loc[FF['date']==datetime(2023,9,14,h,0,0),'WS'].values[0] > 0.5:
             #for ax in axes[1, :]:
             #    ax.plot(FF.loc[FF['date']==datetime(2023,9,14,h,0,0),'WS'], 277, 'X', c=c[1], ms=ms*4, alpha=alpha*1.5)
             axes[1,i].plot(FF.loc[FF['date']==datetime(2023,9,14,h,0,0),'WS'], 277, '^', c=c[1], ms=ms*4)
@@ -964,8 +985,1098 @@ def plotColdAirPools():
 #plt.show()
 
 # --------------------------------------------------------------------
-# plot ???
+# plot humidity
 # --------------------------------------------------------------------
 
+def plotHumidity():
+        
+    plt.rcParams.update({'font.size': 22})
+    fig,ax = plt.subplots(figsize=(20,8),dpi=300)
+    
+    #ax.plot(NB['date']+pd.Timedelta(minutes=30),NB['rh_u'],'-',c=c[9], label='glacier')
+    ax.plot(humilog_upper['date'],humilog_upper['RH'], '-', lw=lw/2, c=c[8],   label='tongue$_{upper}$')
+    ax.plot(humilog_lower['date'],humilog_lower['RH'], '-', lw=lw/2, c='grey', label='tongue$_{lower}$')
+    ax.plot(FF['date'],FF['RH'], '-', lw=lw/2, c=c[1], label='inlet')
+    
+    ax.axvspan(xmin=IOP_start, xmax=IOP_end, ymin=0, ymax=1, facecolor='grey', alpha=0.1)
+    #ax.axvline(np.datetime64('2023-09-12T16:00:00'),c=c[9],ls='--') # swapped radiometer
+    #ax.axvline(np.datetime64('2023-09-12T17:00:00'),c=c[9],ls='--') # swapped radiometer
+    #ax.axvline(np.datetime64('2023-09-13T08:00:00'),c=c[9],ls='--') # swapped hygroclip sensor
+    ax.set_ylabel('relative humidity (%)')#, c=c[0])
+    ax.set_ylim(27,100)
+    ax.tick_params(axis='y')#, colors=c[0])
+    
+    ax2 = ax.twinx()
+    #ax.plot(NB['date'],NB['t_u'],'-',c=c[9],lw=lw, label='glacier',zorder=10)
+    ax2.plot(humilog_upper['date'],humilog_upper['T'], ':', c=c[8], zorder=10)
+    ax2.plot(humilog_lower['date'],humilog_lower['T'], ':', c='grey', zorder=10)
+    ax2.plot(FF['date'],FF['T'], ':', c=c[1], zorder=10)
+    #ax.plot(NV['date'],NV['t'],'-',c=c[6],lw=lw, label='outlet',zorder=10)
+    #ax.plot(MG['date'],MG['T'],'-',c=c[2],lw=lw, label='valley1',zorder=10)
+    #ax.plot(BH['date'],BH['t'],'-',c=c[5],lw=lw, label='valley2',zorder=10)
+    
+    ax2.plot((),(),  '-', lw=lw/2, c='k', label='relative humidity',zorder=10)
+    ax2.plot((),(),  ':', c='k', label='temperature',zorder=10)
+    ax2.set_ylabel('temperature (\u00b0C)', rotation=270, labelpad=25)
+    ax2.set_ylim(0,12)
+    ax2.legend(loc=3)
+    
+    ax.set_xlim(start,end)
+    ax.set_xlim(datetime(2023,9,13,0,0,0),datetime(2023,9,15,0,0,0))
+    ax.set_xlabel('local time')
+    fig.autofmt_xdate(rotation=45)
+    ax.legend(loc=4)
+    plt.grid()
+    plt.savefig('plots/plots_campaign/rh.png', format='png')
+    #plt.savefig('plots/plots_campaign/rh_ext.png', format='png')
+    
+    plt.show()
 
 
+# --------------------------------------------------------------------
+# plot pressure
+# --------------------------------------------------------------------
+
+def plotPressure():
+
+    plt.rcParams.update({'font.size': 22})
+    fig,ax = plt.subplots(figsize=(20,8),dpi=300)
+    
+    ax.plot(NB['date'],NB['p_u'],'-',c=c[9], label='glacier')
+    
+    ax.axvspan(xmin=IOP_start, xmax=IOP_end, ymin=0, ymax=1, facecolor='grey', alpha=0.1)
+    #ax.axvline(np.datetime64('2023-09-12T16:00:00'),c=c[9],ls='--') # swapped radiometer
+    #ax.axvline(np.datetime64('2023-09-12T17:00:00'),c=c[9],ls='--') # swapped radiometer
+    ax.axvline(np.datetime64('2023-09-13T08:00:00'),c=c[9],ls='--') # swapped hygroclip sensor
+    ax.set_ylabel('pressure (hPa)')#, c=c[0])
+    ax.tick_params(axis='y')#, colors=c[0])
+    
+    ax.set_xlim(start,end)
+    #ax.set_xlim(datetime(2023,9,12,12,0,0),datetime(2023,10,18,12,0,0))
+    ax.set_xlabel('local time')
+    fig.autofmt_xdate(rotation=45)
+    plt.legend(loc=8)
+    plt.grid()
+    #plt.savefig('plots/plots_campaign/rh.png', format='png')
+    #plt.savefig('plots/plots_campaign/rh_ext2.png', format='png')
+    
+    plt.show()
+
+# --------------------------------------------------------------------
+# plot radiation
+# --------------------------------------------------------------------
+
+def plotRadiation():
+    
+    plt.rcParams.update({'font.size': 22})
+    fig,ax = plt.subplots(figsize=(20,8),dpi=300)
+    
+    #ax.plot(SM['date'],SM['SW_in'],  '-',c=c[3], label='plateau')
+    ax.plot(NB['date']+pd.Timedelta(minutes=30),NB['dsr_cor'],'-',c=c[9], label='glacier')
+    ax.plot(FF['date'],FF['SW_in'],  '-',c=c[1], label='inlet')
+    ax.plot(NB['date'],NB['usr_cor'],':',c=c[9])
+    ax.plot(FF['date'],FF['SW_out'], ':',c=c[1])
+    ax.plot(NB['date'],NB['dlr'],'-',c=c[9])
+    ax.plot(NB['date'],NB['ulr'],':',c=c[9])
+    ax2 = ax.twinx()
+    ax2.scatter(NB['date'],NB['cc'],marker='o',c=c[9])
+    ax.plot((),(),'-',c='k',label='in')
+    ax.plot((),(),':',c='k',label='out')
+    
+    ax.axvspan(xmin=IOP_start, xmax=IOP_end, ymin=0, ymax=1, facecolor='grey', alpha=0.1)
+    ax.axvline(np.datetime64('2023-09-14T13:45:00'),c=c[1],ls='--') # rotated radiometer on hobo station
+    ax.set_ylabel('shortwave radiation (W/m${^2}$)')
+    
+    ax.set_xlim(start,end)
+    ax.set_xlim(datetime(2023,9,11,0,0,0),datetime(2023,9,19,0,0,0))
+    ax.set_xlabel('local time')
+    ax.set_ylim(0,750)
+    fig.autofmt_xdate(rotation=45)
+    ax.legend()
+    plt.grid()
+    plt.savefig('plots/plots_campaign/rad.png', format='png')
+    
+    plt.show()
+
+
+# --------------------------------------------------------------------
+# plot precipitation
+# --------------------------------------------------------------------
+
+def plotPrecipitation():
+
+    #start = datetime(2023,  9, 17, 0, 0, 0)
+    #end   = datetime(2023, 10, 17, 0, 0, 0)
+    
+    plt.rcParams.update({'font.size': 22})
+    fig,ax = plt.subplots(figsize=(20,8),dpi=300)
+    offset = pd.Timedelta(hours=4,minutes=11)
+    w=.1#.01
+    
+    ax.bar(FF['date']-offset,FF['PREC_day'],width=w,color=c[1], label='inlet')
+    ax.bar(MG['date']       ,MG['PREC_day'],width=w,color=c[2], label='valley1')
+    ax.bar(BH['date']+offset,BH['prec_day'],width=w,color=c[5], label='valley2')
+    ax.axvline(np.datetime64('2023-09-15T17:00:00'),c=c[1],ls='--') # activated rain gauge
+    ax.set_ylabel('precipitation (mm/h)')
+    
+    ax.set_xlim(start,end)
+    ax.set_xlim(datetime(2023,  9, 11, 0, 0, 0),datetime(2023, 10, 17, 0, 0, 0))
+    ax.set_xlabel('local time')
+    #ax.set_ylim(0,2)
+    fig.autofmt_xdate(rotation=45)
+    plt.legend(loc=9)
+    plt.grid()
+    #plt.savefig('plots/plots_extended-period/precip.png', format='png')
+    
+    plt.show()
+
+
+# --------------------------------------------------------------------
+# interpolate and plot UAV data
+# --------------------------------------------------------------------
+
+# load already stored intalts
+def load_intalts(t):
+    with open(f'data/interpolation/intalts/intalts_{t[:5]}.txt', "r") as file:
+        intalts = file.read()
+        intalts = ast.literal_eval(intalts)
+    return intalts
+def load_intaltsext(t):
+    with open(f'data/interpolation/intalts/intaltsext_{t[:5]}.txt', "r") as file:
+        intalts_extended = file.read()
+        intalts_extended = ast.literal_eval(intalts_extended)
+    return intalts_extended
+
+def get_elevation(lon, lat, dataset):
+    # Transform coordinates to the dataset's CRS
+    transformer = Transformer.from_crs("epsg:4326", dataset.crs, always_xy=True)
+    x, y = transformer.transform(lon, lat)
+
+    # Get row and column in the image for the given coordinate
+    row, col = rowcol(dataset.transform, x, y)
+
+    # Check if the row and column are within the bounds of the image
+    if (0 <= row < dataset.height) and (0 <= col < dataset.width):
+        # Read the dataset's values at the discovered row and column
+        value = dataset.read(1)[row, col]
+        return value
+    else:
+        # Return NaN if the coordinate is outside the raster
+        return np.nan
+    return value
+
+def get_intalts(intpts, path, dem_hd_path, update_intalts_from_DEM): #=dem_uav_path):
+    if update_intalts_from_DEM == True:
+        with rasterio.open(path) as dataset:
+            elevations_uav = [get_elevation(lon, lat, dataset) for lat, lon in intpts]
+        with rasterio.open(dem_hd_path) as dataset:
+            elevations_hd = [get_elevation(lon, lat, dataset) for lat, lon in intpts]
+        
+    elevations_uav = [e if e > 0 else np.nan for e in elevations_uav] #375
+    elevations_hd = [e if e > 0 else np.nan for e in elevations_hd] #375 
+    return elevations_uav, elevations_hd #intalts
+
+
+def interpolate_array(array, n, x, arraytype='normal'):
+    original_length = len(array)
+    original_indices = np.linspace(0, original_length-1, original_length)
+    new_length = (n-1)*x + 1
+    new_indices = np.linspace(0, original_length-1, new_length)
+    if arraytype == 'coord':
+        interpolated_lat = np.interp(new_indices, original_indices, [coord[0] for coord in array])
+        interpolated_lon = np.interp(new_indices, original_indices, [coord[1] for coord in array])
+        interpolated_array = list(zip(interpolated_lat, interpolated_lon))
+    else:
+        interpolated_array = np.interp(new_indices, original_indices, array)
+    return interpolated_array
+
+def get_intaltsext(intpts, path, dem_hd_path): #=dem_uav_path):
+    # create extended intalts for final plot
+    intpts_extended = interpolate_array(intpts, len(intpts), 10, 'coord')
+#    print ('diff in intpts and intptsext: ', np.array(intpts_extended[::10])-np.array(intpts))
+    with rasterio.open(path) as dataset:
+        elevations_uav = [get_elevation(lon, lat, dataset) for lat, lon in intpts_extended]
+    with rasterio.open(dem_hd_path) as dataset:
+        elevations_hd = [get_elevation(lon, lat, dataset) for lat, lon in intpts_extended]
+        
+    elevations_uav = [e if e > 0 else np.nan for e in elevations_uav]
+    elevations_hd = [e if e > 0 else np.nan for e in elevations_hd] 
+    return elevations_uav, elevations_hd
+
+
+def interpolate_coordinates(coordinates, n, x):
+    original_length = len(coordinates)
+    original_indices = np.linspace(0, original_length-1, original_length)
+    new_length = n*x + 1
+    new_indices = np.linspace(0, original_length-1, new_length)
+
+    interpolated_lat = np.interp(new_indices, original_indices, [coord[0] for coord in coordinates])
+    interpolated_lon = np.interp(new_indices, original_indices, [coord[1] for coord in coordinates])
+
+    interpolated_coordinates = list(zip(interpolated_lat, interpolated_lon))
+    return interpolated_coordinates
+
+
+def add_obs(interpolated_dist_z, target_dists, target_zs, obsloc, xind_inlet, var='t', ndint=False):
+    if obsloc == 'outlet':
+        xind = np.where(target_dists >= xind_outlet)[1][0]
+        zind = np.where(target_zs == round(outlet_aws[2]))[0][0]
+        if ndint == False:
+            zind = 0
+        tobs = NV.loc[NV['date']>=date,'t'].iloc[0]
+    elif obsloc == 'inlet':
+        xind = np.where(target_dists >= xind_inlet)[1][0]
+        zind = np.where(target_zs == round(inlet_aws[2]))[0][0]
+        if ndint == False:
+            zind = 0
+        if var == 't':
+            tobs = FF.loc[FF['date']>=date,'T'].iloc[0]
+        elif var == 'rh':
+            tobs = FF.loc[FF['date']>=date,'RH'].iloc[0]
+    print (xind,zind)
+    print (f'old value: {interpolated_dist_z[zind,xind]}')
+    interpolated_dist_z[zind,xind] = tobs
+    print (f'new value: {interpolated_dist_z[zind,xind]}')
+    
+    if ndint == True:
+        # update interpolated field with new point
+        non_nan_indices = np.where(~np.isnan(interpolated_dist_z))
+        points = np.column_stack(non_nan_indices)
+        values = interpolated_dist_z[non_nan_indices]
+        interpolator = LinearNDInterpolator(points, values)
+        all_indices = np.indices(interpolated_dist_z.shape)
+        interpolated_dist_z = interpolator(all_indices[0],all_indices[1])
+    return interpolated_dist_z
+    
+
+# part 1 of interpolation procedure ----------------------------------
+    
+glacier_aws =  (7.197794684331172, 61.686051540061946, 550)
+upper_tongue = (7.198646470752097, 61.683231702332485, 480)
+lower_tongue = (7.198529491371879, 61.6814934541163,   462)
+# front @ 493-495 m
+inlet_aws =    (7.211611010507808, 61.675952354678884, 277)
+outlet_aws =   (7.2415509,         61.6672661,         276)
+
+pt_gla = Point(glacier_aws[1], glacier_aws[0]) # glacier
+pt_tup = Point(upper_tongue[1], upper_tongue[0]) # upper tongue
+pt_tlo = Point(lower_tongue[1], lower_tongue[0]) # lower tongue
+pt_fro = Point(61.6805, 7.1993) # front
+pt_inl = Point(inlet_aws[1], inlet_aws[0]) # inlet
+pt_out = Point(outlet_aws[1], outlet_aws[0]) # outlet
+
+# find elevation of points from updated DEM
+#dem_uav_path = 'data/DEM/Nigardsbreen140923_10cm_DSM.tif'
+dem_uav_path = 'data/DEM/Nigardsbreen_Wingtra_DSM_aligned.tif'
+dem_hd_path = 'data/DEM/Jostedalsbreen_10m.tif'
+update_intalts_from_DEM = True
+
+def interpolateUAV_p1(ind1=0, ind2=2, day='13'):
+    
+    path = 'data/UAV/iMet/'
+    extension = 'csv'
+    
+    fns = glob.glob(path+'*.{}'.format(extension))
+    imets = {}
+
+    profiles = ['5','5-US','7','7-US','10','10-US','13','13-US','16']
+    profiles = profiles[ind1:ind2]#['11']#
+    
+    outlet = False
+    inlet = True#False
+    
+    for ph in profiles:
+        for fn in fns:
+            #print (fn[len(path)+6:len(path)+8],fn[len(path)+25:len(path)+33])
+            if (fn[len(path)+6:len(path)+8] == day):# and (fn[-14:] != 'paraglider.csv'):
+                imet = pd.read_csv(fn, sep=',', dtype='string', 
+                                   usecols=['XQ-iMet-XQ Pressure', 'XQ-iMet-XQ Air Temperature', 'XQ-iMet-XQ Humidity', \
+                                            'XQ-iMet-XQ Date', 'XQ-iMet-XQ Time','XQ-iMet-XQ Longitude', \
+                                            'XQ-iMet-XQ Latitude', 'XQ-iMet-XQ Altitude', 'Profile hour'])
+                if imet.empty:
+                    print(f'DataFrame is empty!')
+                else:
+                    imet = imet.rename(columns={'XQ-iMet-XQ Pressure': 'p', 'XQ-iMet-XQ Air Temperature': 't', \
+                                                'XQ-iMet-XQ Humidity': 'rh', 'XQ-iMet-XQ Date': 'Date', \
+                                                'XQ-iMet-XQ Time': 'time', 'XQ-iMet-XQ Longitude': 'lon', \
+                                                'XQ-iMet-XQ Latitude': 'lat', 'XQ-iMet-XQ Altitude': 'z', \
+                                                'Profile hour': 'hour'})
+                    imet = (imet.astype({col: float for col in imet.columns[:3]}))
+                    imet = (imet.astype({col: float for col in imet.columns[5:8]}))
+                    imet['pt'] = (imet['t']+273.15)*(1013/imet['p'])**(0.286)
+                    if fn[-14:] == 'paraglider.csv' or (fn[len(path)+6:len(path)+8] == '12' and fn[-9:] == 'front.csv'):
+                        imet['date'] = pd.to_datetime(imet['Date']+' '+imet['time'], format='%d/%m/%Y %H:%M:%S')
+                    else:
+                        imet['date'] = pd.to_datetime(imet['Date']+' '+imet['time'], format='%Y/%m/%d %H:%M:%S')
+                    del imet['Date'], imet['time']
+    
+                    if fn[len(path)+25:len(path)+28] != 'gla':
+                        imet_tmp = imet.loc[(imet['hour'])==ph]
+                        if imet_tmp.empty != True:
+                            if fn[-14:] != 'paraglider.csv':
+                                imets[fn[len(path)+6:len(path)+8]+'-'+ph+'-'+fn[len(path)+25:len(path)+28]] = imet_tmp.reset_index(drop=True)
+                            else:
+                                print ('using paraglider data')
+                                imets[fn[len(path)+6:len(path)+8]+'-'+ph+'-'+fn[len(path)+25:len(path)+28]+'aglider'] = imet_tmp.reset_index(drop=True)
+                    else:
+                        imet_tmp = imet.loc[imet['hour']==ph+'-UP']
+                        if imet_tmp.empty != True:
+                            imets[fn[len(path)+6:len(path)+8]+'-'+ph+'-'+fn[len(path)+25:len(path)+28]+'-upper'] = imet_tmp.reset_index(drop=True)
+                        imet_tmp = imet.loc[imet['hour']==ph+'-LOW']
+                        if imet_tmp.empty != True:
+                            imets[fn[len(path)+6:len(path)+8]+'-'+ph+'-'+fn[len(path)+25:len(path)+28]+'-lower'] = imet_tmp.reset_index(drop=True)
+                        #imet_tmp = imet.loc[imet['hour']==ph+'-extra']
+                        #if imet_tmp.empty != True:
+                        #    imets[fn[len(path)+6:len(path)+8]+'-'+ph+'-'+fn[len(path)+25:len(path)+28]+'-extra'] = imet_tmp.reset_index(drop=True)
+                    if imet_tmp.empty:
+                        print (fn[len(path)+6:len(path)+8]+'-'+ph+'-'+fn[len(path)+25:len(path)+35])
+                    elif fn[len(path)+25:len(path)+28] == 'out':
+                        #print (fn, imet_tmp)
+                        outlet = True
+                    elif fn[len(path)+25:len(path)+28] == 'in':
+                        inlet = True
+    
+    sorted_keys = sorted(imets, key=lambda x: imets[x].loc[0, 'lat'])
+    imets = {key: imets[key] for key in sorted_keys}
+        
+    # read data
+    im = plt.imread('data/map/2022-08-31-00_00_2022-08-31-23_59_Sentinel-2_L1C_True_color_Gjerde.png')
+    
+    fig,ax = plt.subplots()
+    zoom = 2
+    w, h = fig.get_size_inches()
+    fig.set_size_inches(w * zoom, h * zoom)
+    
+    xmin=7.111416
+    xmax=7.30299
+    ymin=61.650282
+    ymax=61.705824
+    
+    ax.imshow(im, extent=[xmin,xmax,ymin,ymax], aspect='auto')
+    
+    lons = []
+    lats = []
+    alts = []
+    
+    if outlet == False:
+        print ('adding outlet')
+        lons.append(outlet_aws[0])
+        lats.append(outlet_aws[1])
+        alts.append(outlet_aws[2])
+    if inlet == False:
+        print ('adding inlet')
+        lons.append(inlet_aws[0])
+        lats.append(inlet_aws[1])
+        alts.append(inlet_aws[2])
+    
+    for t in imets:#profiles:#times:
+        if imets[t].empty:
+            print(f'DataFrame {t} is empty!') # shouldn't be necessary any longer
+        else:
+            imet_tmp = imets[t]
+    
+            # define points for interpolation line
+            if t[-10:] != 'paraglider':
+                lons.append(imet_tmp['lon'].values[0])
+                lats.append(imet_tmp['lat'].values[0])
+                alts.append(imet_tmp['z'].values[0])
+            else:
+                print ('adding paraglider')
+                lons.append(imet_tmp['lon'].values.mean())
+                lats.append(imet_tmp['lat'].values.mean())
+                alts.append(280)#imet_tmp['z'].values[-1])
+            ax.scatter(imet_tmp['lon'],imet_tmp['lat'],s=30,label=f'{t}')
+            ax.set_xlim(xmin,xmax)
+            ax.set_ylim(ymin,ymax)
+            plt.legend()
+    
+            
+    intpts = []
+    intline = {}
+
+    intline[t[:4]] = pd.DataFrame(columns=['lons','lats','alts','pts'])
+    intline[(t[:4])]['lons'] = lons
+    intline[t[:4]]['lats'] = lats
+    intline[t[:4]]['alts'] = alts
+    intline[t[:4]] = intline[t[:4]].sort_values(by=['lats']).reset_index(drop=True) # shouldn't be necessary any longer
+    for i in range(len(intline[t[:4]]['alts'].values)):
+        intline[t[:4]]['pts'][i] = Point(intline[t[:4]]['lats'][i],intline[t[:4]]['lons'][i])
+        if i == 0:
+            intpts.extend(([intline[t[:4]]['pts'][0].coords[0]]))
+        else:
+            line = (LineString([intline[t[:4]]['pts'][i-1],intline[t[:4]]['pts'][i]]))
+            for div in np.arange(0.1,1,0.1):
+                intpts.extend(line.interpolate(div, normalized=True).coords[:])
+            intpts.extend(([intline[t[:4]]['pts'][i].coords[0]]))
+    
+    for i in range(len(intpts)):
+        ax.scatter(intpts[i][1],intpts[i][0],c='k',s=10)
+        if (i%10) == 0:
+            ax.scatter(intpts[i][1],intpts[i][0],c='k',s=20)
+    ax.scatter(glacier_aws[0], glacier_aws[1], c='k', marker='x', s=60)
+    ax.scatter(upper_tongue[0],upper_tongue[1], c='k', marker='x', s=60)
+    ax.scatter(lower_tongue[0],lower_tongue[1], c='k', marker='x', s=60)
+    ax.scatter(inlet_aws[0],inlet_aws[1], c='k', marker='x', s=60)
+    ax.scatter(outlet_aws[0],outlet_aws[1], c='k', marker='x', s=60)
+    
+    # find index where balloon has drifted more than 0.002 in latitude direction:
+    if t[:5] == '13-5-':
+        max_height = RS4.loc[RS4_ind,'z']
+        print (f'location of radiosonde below {max_height}')
+        ax.scatter(RS4.loc[:RS4_ind,'lon'], RS4.loc[:RS4_ind,'lat'], c='y', marker='^', s=10)
+    
+    if t[:5] == '12-11':
+        max_height = RS2.loc[RS2_ind,'z']
+        print (f'location of radiosonde below {max_height}')
+        ax.scatter(RS2.loc[:RS2_ind,'lon'], RS2.loc[:RS2_ind,'lat'], c='y', marker='^', s=10)
+    
+    #plt.savefig(f'data/interpolation/figures/map_{t[:5]}.png')
+    
+    # find surface altitude of each coordinate on interpolation line
+    try:
+        intalts = load_intalts(t) #intalts# = intalts_stored[t[:5]]
+    except:
+        elevations_uav, elevations_hd = get_intalts(intpts, dem_uav_path, dem_hd_path, update_intalts_from_DEM) # dem_uav_path or dem_hd_path
+        intalts_hd = elevations_hd
+        intalts = [elevations_uav[i] if not np.isnan(elevations_uav[i]) else elevations_hd[i] for i in range(len(elevations_uav))]
+        # save altitudes from DEM along interpolation line to file
+        with open(f'data/interpolation/intalts/intalts_{t[:5]}.txt', 'w') as f:
+            f.write(f"{intalts}\n")
+        print ('created new intalts')
+    else:
+        print ('using already stored intalts')
+    
+    try:
+        intalts_extended = load_intaltsext(t) #intalts# = intalts_stored[t[:5]]
+    except:
+        elevations_uav, elevations_hd = get_intaltsext(intpts, dem_uav_path, dem_hd_path)
+        intalts_extended_hd = elevations_hd
+        intalts_extended = [elevations_uav[i] if not np.isnan(elevations_uav[i]) else elevations_hd[i] for i in range(len(elevations_uav))]
+        with open(f'data/interpolation/intalts/intaltsext_{t[:5]}.txt', 'w') as f:
+            f.write(f"{intalts_extended}\n")
+        print ('created new intalts_extended')
+    else:
+        print ('using already stored intalts_extended')
+    
+    # calculate distance along interpolation line
+    intdist = [0]
+    geod = Geod(ellps="WGS84")
+    
+    for i in range(1,len(intpts)):
+        line_string = (LineString([intpts[i],intpts[i-1]]))
+        intdist.extend([intdist[-1]+geod.geometry_length(line_string)])
+
+    # check interpolation line
+    fig, ax = plt.subplots(figsize=(10,5))
+    plt.plot(intdist, intalts_extended[::10], marker='o', linestyle='-', c='blue')
+    #plt.plot(intdist, intalts_extended_hd[::10], marker='o', linestyle='-', c='red')
+    plt.plot(intdist, intalts, marker='o', linestyle='-', c='y')
+    for i in range(0,len(intdist),10):
+        plt.axvline(intdist[i])
+    plt.axhline(375)
+    plt.title('x, z')
+    plt.xlabel('distance (m)')
+    plt.ylabel('elevation (m a.s.l.)')
+    plt.grid(True)
+    plt.show()
+    
+    # adding outlet data to dateframe dictionary if missing
+    fs = list(imets.keys())[0]
+    day = fs[:2]
+    hour = fs[3:4]
+    if fs[3] == '1':
+        hour = fs[3:5]
+    date = datetime(2023,9,int(day),int(hour)+2,0,0)
+    if len(intalts[::10])-len(imets) == 1:
+        print ('let us add something')
+        if outlet == False and inlet == True:
+            print ('adding outlet observation')
+            sorted_keys_new = np.append(f'{fs[:5]}-outlet', sorted_keys)#, list(imets.keys())
+            imets[f'{fs[:5]}-outlet'] = pd.DataFrame(columns=imets[sorted_keys[0]].columns)
+            imets[f'{fs[:5]}-outlet'].loc[0] = np.ones(len(imets[f'{fs[:5]}-outlet'].columns))*np.nan
+            imets[f'{fs[:5]}-outlet'].loc[0,'t'] = NV.loc[NV['date']>=date,'t'].iloc[0]
+            imets[f'{fs[:5]}-outlet'].loc[0,'lon'] = outlet_aws[0]
+            imets[f'{fs[:5]}-outlet'].loc[0,'lat'] = outlet_aws[1]
+            imets[f'{fs[:5]}-outlet'].loc[0,'z'] = outlet_aws[2]
+            imets = ({k: imets[k] for k in sorted_keys_new})
+            #print (imets[f'{fs[:5]}-outlet'])
+        elif outlet == True and inlet == False:
+            print ('adding inlet observation')
+            sorted_keys.insert(1,f'{fs[:5]}-inlet') # preparing to add df to 2nd entry of dictionary
+            imets[f'{fs[:5]}-inlet'] = pd.DataFrame(columns=imets[sorted_keys[0]].columns)
+            imets[f'{fs[:5]}-inlet'].loc[0] = np.ones(len(imets[f'{fs[:5]}-inlet'].columns))*np.nan
+            imets[f'{fs[:5]}-inlet'].loc[0,'t'] = FF.loc[FF['date']>=date,'T'].iloc[0]
+            imets[f'{fs[:5]}-inlet'].loc[0,'lon'] = inlet_aws[0]
+            imets[f'{fs[:5]}-inlet'].loc[0,'lat'] = inlet_aws[1]
+            imets[f'{fs[:5]}-inlet'].loc[0,'z'] = inlet_aws[2]
+            
+            imets = ({k: imets[k] for k in sorted_keys})
+
+    return t, imets, intdist, intpts, intalts, intalts_extended, date
+
+
+
+
+# part 2 of interpolation procedure ----------------------------------
+
+def interpolateUAV_p2(var='t', date=date, pt_contours=None):
+    
+    processed_dfs = []
+    
+    var = var#'t'
+    print (var)
+    
+    #if var == 't':
+    fig, (ax1,ax2) = plt.subplots(1,2,figsize=(10,5))
+        
+    selected_columns = ['z',var]
+    
+    for df_tmp in imets:
+        if imets[df_tmp].empty:
+            print(f'DataFrame is empty!')
+        else:
+            # Select specific columns
+            df_selected = imets[df_tmp][selected_columns]
+    
+            # for ascents:
+            # Add a column to track the cumulative maximum of 'z' so far for each row    
+            df_selected['max_z'] = df_selected['z'].copy() ######
+            df_selected['max_z'] = df_selected['max_z'].cummax()
+            
+            if df_tmp != '13-13-paraglider':
+                # Filter the DataFrame to keep only the rows where 'z' equals its cumulative maximum (except paraglider flight)
+                df_selected = df_selected[df_selected['z'] == df_selected['max_z']].drop(columns='max_z')
+            else:
+                df_selected = df_selected.drop(columns='max_z')
+    
+            # Sort the DataFrame by the 'z' column in ascending order
+            df_selected_sorted = df_selected.sort_values(by='z', ascending=True)
+            #if (df_selected.equals(df_selected_sorted)) == False:
+            #    for x,y,i,j in zip(df_selected[var],df_selected_sorted[var],df_selected[var].index,df_selected_sorted[var].index):
+            #        #print ('ind', i)
+            #        if x != y:
+            #            print (x,y,i,j)#,df_selected.iloc[i],df_selected_sorted.iloc[i])
+    
+            # Round the 'z' values and calculate the mean for each group
+            df_selected_sorted['zr'] = df_selected_sorted['z'].round()
+            #print (df_selected_sorted['zr'])
+    
+            #print (df_selected_sorted)
+            df_selected_sorted = df_selected_sorted.groupby('zr').mean()
+            #print (df_selected_sorted)
+    
+            # fill gaps in data
+            df_selected_tmp = pd.DataFrame({'zr': np.arange(min(df_selected_sorted.reset_index()['zr']),max(df_selected_sorted.reset_index()['zr'])+1,1)})
+            df_selected_sorted = pd.merge(df_selected_tmp, df_selected_sorted, how='outer', on='zr') #.fillna(0)
+            df_selected_sorted = df_selected_sorted.interpolate(method='linear', axis=0)
+    
+            # Calculate the rolling mean of the sorted DataFrame
+            if len(df_selected_sorted) != 1:
+                df_selected_sorted_smoothed = df_selected_sorted.rolling(3).mean()
+            else:
+                df_selected_sorted_smoothed = df_selected_sorted
+            #print (df_selected_sorted_smoothed)
+            if df_tmp == '13-13-paraglider':
+                print (df_selected)
+            # Plotting temp vs z
+            ax1.plot(df_selected[var], df_selected['z'], marker='o', ls='-', lw=1, ms=5, label=df_tmp)#imets[df_tmp]['lat'].iloc[0])
+            ax2.plot(df_selected_sorted_smoothed[var], df_selected_sorted_smoothed['z'], marker='o', ls='-', lw=1, ms=5, label=df_tmp)#imets[df_tmp]['lat'].iloc[0])
+            #plt.savefig(loc_fig)
+    
+            # Add the processed DataFrame to the list
+            if len(df_selected_sorted) != 1:
+                processed_dfs.append(df_selected_sorted_smoothed[2:].reset_index(drop=True))  #first two rows are nans due to smoothing 
+            else:
+                processed_dfs.append(df_selected_sorted_smoothed.reset_index(drop=True))
+            
+    if t[:5] == '12-11':
+        ax1.plot(RS2.loc[:RS2_ind,var], RS2.loc[:RS2_ind,'z'], c='k', marker='o', ls='-', lw=1, ms=5, label='radiosonde')
+        ax2.plot(RS2.loc[:RS2_ind,var], RS2.loc[:RS2_ind,'z'], c='k', marker='o', ls='-', lw=1, ms=5, label='radiosonde')
+    if t[:5] == '13-5-':
+        ax1.plot(RS4.loc[:RS4_ind,var], RS4.loc[:RS4_ind,'z'], c='k', marker='o', ls='-', lw=1, ms=5, label='radiosonde')
+        ax2.plot(RS4.loc[:RS4_ind,var], RS4.loc[:RS4_ind,'z'], c='k', marker='o', ls='-', lw=1, ms=5, label='radiosonde')
+    
+    if var == 't':
+        ax1.plot(ttNB.loc[ttNB['date_N5_']==date,['t_N5_']], glacier_aws[2]+2.79, c='y', marker='o', ls='-', lw=1, ms=2*5)
+        ax1.plot(ttNB.loc[ttNB['date_N4_']==date,['t_N4_']], glacier_aws[2]+1.79, c='y', marker='o', ls='-', lw=1, ms=2*5)
+        ax1.plot(ttNB.loc[ttNB['date_N3_']==date,['t_N3_']], glacier_aws[2], c='y', marker='o', ls='-', lw=1, ms=2*5)
+        #ax1.plot(ttNB.loc[ttNB['date_N3_']==date,['t_N3_']], glacier_aws[2], c='y', marker='o', ls='-', lw=1, ms=2*5, label='tinytags')
+        ax1.scatter(humilog_upper.loc[humilog_upper['date']>=date,'T'].iloc[0],upper_tongue[2], c='turquoise', s=200, marker='^', zorder=1000)
+        ax1.scatter(humilog_lower.loc[humilog_upper['date']>=date,'T'].iloc[0],lower_tongue[2], c='orange', s=200, marker='^', zorder=1000)
+        ax1.scatter(FF.loc[FF['date']>=date,'T'].iloc[0],inlet_aws[2], c='grey', marker='^', s=200, zorder=1000)
+        ax1.scatter(NV.loc[NV['date']>=date,'t'].iloc[0],outlet_aws[2], marker='^', s=200, zorder=1000)
+        ax2.plot(ttNB.loc[ttNB['date_N5_']==date,['t_N5_']], glacier_aws[2]+2.79, c='y', marker='o', ls='-', lw=1, ms=2*5)
+        ax2.plot(ttNB.loc[ttNB['date_N4_']==date,['t_N4_']], glacier_aws[2]+1.79, c='y', marker='o', ls='-', lw=1, ms=2*5)
+        ax2.plot(ttNB.loc[ttNB['date_N3_']==date,['t_N3_']], glacier_aws[2], c='y', marker='o', ls='-', lw=1, ms=2*5)
+        #ax2.plot(ttNB.loc[ttNB['date_N3_']==date,['t_N3_']], glacier_aws[2], c='y', marker='o', ls='-', lw=1, ms=2*5, label='tinytags')
+        ax2.scatter(humilog_upper.loc[humilog_upper['date']>=date,'T'].iloc[0],upper_tongue[2], c='turquoise', s=200, marker='^', zorder=1000)
+        ax2.scatter(humilog_lower.loc[humilog_upper['date']>=date,'T'].iloc[0],lower_tongue[2], c='orange', s=200, marker='^', zorder=1000)
+        ax2.scatter(FF.loc[FF['date']>=date,'T'].iloc[0],inlet_aws[2], c='grey', marker='^', s=200, zorder=1000)
+        ax2.scatter(NV.loc[NV['date']>=date,'t'].iloc[0],outlet_aws[2], marker='^', s=200, zorder=1000)
+    
+    ax1.set_title(f'{date} not smoothed')
+    ax1.legend(loc='best')
+    ax2.set_title(f'{date} smoothed')
+    ax2.legend(loc='best')
+    
+    #plt.savefig(f'data/interpolation/figures/profiles_{var}_{t[:5]}.png')
+    
+    z_dist = []
+    for i in range(len(processed_dfs)):
+        if processed_dfs[i].empty:
+            print(f'DataFrame {[i]} is empty!')
+        else:
+            z_dist.extend([np.min(processed_dfs[i]['zr'])])
+    
+    # Define a list of distances
+    dist = intdist[0::10] #list(round(hor_up.loc[hor_up['ascents'] != 'nan','x']))### distance along centerline
+    dist = [round(x) for x in dist]
+    
+    # Adding a 'dist' column to each DataFrame with corresponding values from the 'dist' list
+    for i in range(len(processed_dfs)):
+        processed_dfs[i]['dist'] = dist[i]
+    
+    #if var == 'pt':
+        
+    fig, ax2 = plt.subplots(nrows=1, figsize=(10, 6))
+    plt.style.use('seaborn-v0_8-talk')
+    
+    # the 'z' needs to be shifted so that the lowest (first) value is the value of intalts for the corresponding location
+    
+    def shift_z(df):
+        d = df['dist'].iloc[0]
+        idx = np.abs(intdist - d).argmin()
+        z_base = intalts[idx]
+        return df['z'] - df['z'].min() + z_base
+    
+    cntr1 = plt.plot(intdist, intalts)
+    for i in range(len(processed_dfs)):
+        if shift_z(processed_dfs[i])[0] > processed_dfs[i]['z'][0]:
+            print (f'shifting profile nr {i} up {shift_z(processed_dfs[i])[0] - processed_dfs[i]['z'][0]} meters')
+            processed_dfs[i]['z_shifted'] = shift_z(processed_dfs[i])
+        else:
+            # not shifting down
+            processed_dfs[i]['z_shifted'] = processed_dfs[i]['z']
+        cntr1 = plt.plot(processed_dfs[i]['dist'], processed_dfs[i]['z_shifted'])
+    
+    ax2.set_xlabel('distance along centerline [m]')
+    ax2.set_ylabel('elevation [m a.s.l.]')
+    ax2.grid()
+    
+    #z_start = [np.min(processed_dfs[i]['z_shifted']) for i in range(len(processed_dfs))]
+    z_end   = [np.max(processed_dfs[i]['z_shifted']) for i in range(len(processed_dfs))]
+    start_level = 195
+    end_level = np.max(z_end)
+    x_plot = interpolate_array(intdist, len(intdist), 10)
+    z_plot = np.arange(start_level, end_level+1, 1)
+    xdim = len(x_plot)
+    zdim = len(z_plot)
+    xs, zs = np.meshgrid(x_plot, z_plot)
+    
+    # creating empty 2D array (xyspacenew) for interpolation purposes
+    # first entry of each column is ground level (not a specific altitude level)
+    xyspacenew = np.ones((xdim, zdim,))*np.nan
+    
+    # populating the xyspacenew array with variable values from each df
+    for idx, df in enumerate(processed_dfs):
+        row_index = idx*100
+        start_index = int(np.nanmin(df['z_shifted'])-intalts[idx*10]) # set profile position relative to ground level
+        if start_index < 0:
+            print ('profile shifted up to ground level')
+            start_index = 0 # ensure all profiles start at or above ground
+        end_index = start_index+df['z_shifted'].count()
+        print (start_index,end_index)
+        xyspacenew[row_index, start_index:end_index] = df[var]  # assign t/pt/rh values to the array from bottom of profile and up
+        
+    xyspacenew = xyspacenew.T
+    
+    # add outlet/inlet near surface observation if missing
+    ex = '-' # extra string needed for imet keys with 2 digit hour (i.e., 10, 13, 16)
+    if t[4] == '-':
+        ex = ''
+        
+    add_glacier_obs = True
+    add_inlet_obs = True
+    add_outlet_obs = True
+    
+    
+    # locations along interpolation line
+    closest_point_outlet = min(intpts, key=lambda x: pt_out.distance(Point(x)))
+    xind_outlet = intdist[intpts.index(closest_point_outlet)]
+    closest_point_inlet = min(intpts, key=lambda x: pt_inl.distance(Point(x)))
+    xind_inlet = intdist[intpts.index(closest_point_inlet)]
+    print (xind_inlet)
+    closest_point_front = min(intpts, key=lambda x: pt_fro.distance(Point(x)))
+    xind_front = intdist[intpts.index(closest_point_front)]
+    closest_point_tonlow = min(intpts, key=lambda x: pt_tlo.distance(Point(x)))
+    xind_tonlow = intdist[intpts.index(closest_point_tonlow)]
+    closest_point_tonup = min(intpts, key=lambda x: pt_tup.distance(Point(x)))
+    xind_tonup = intdist[intpts.index(closest_point_tonup)]
+    closest_point = min(intpts, key=lambda x: pt_gla.distance(Point(x)))
+    xind_glacier = intdist[intpts.index(closest_point)]
+    
+    if var == 't':
+        try:
+            imets[t[:5]+ex+'gla-lower']
+        except:
+            pass
+        else:
+            if np.isnan(xyspacenew[2,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100]):
+                if add_glacier_obs == True:
+                    print ('adding glacier near-surface observation and interpolating linearly up to start of vertical profile')
+                    first_nonnan = np.where(np.isnan(xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100])==False)[0][0]
+                    #print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100])
+                    xyspacenew[1,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100] = ttNB.loc[ttNB['date_N3_']==date,'t_N3_']
+                    #if np.isnan(xyspacenew[1,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100]):
+                    xyspacenew[2,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100] = ttNB.loc[ttNB['date_N4_']==date,'t_N4_']
+                    #    if np.isnan(xyspacenew[2,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100]):
+                    xyspacenew[3,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100] = ttNB.loc[ttNB['date_N5_']==date,'t_N5_']
+                            #print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100])
+                    first_nan = np.where(np.isnan(xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100]))[0][0]
+            
+                    x = np.array([first_nan-1, first_nonnan])#, 1)
+                    y = xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100]#[first_nan-1:first_nonnan+1]
+                    y = np.array([y[first_nan-1],y[first_nonnan]])
+                    f = interpolate.interp1d(x, y, kind='linear', bounds_error=False, fill_value='extrapolate')
+                    x_new = np.arange(first_nan, first_nonnan, 1)
+                    xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100][first_nan:first_nonnan] = f(x_new)
+            #        print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'gla-lower')*100][first_nan:first_nonnan])
+                else:
+                    print ('consider adding glacier observation because profile starts above surface')
+        try:
+            imets[t[:5]+ex+'out']
+        except:
+            pass
+        else:
+            if np.isnan(xyspacenew[0,list(imets.keys()).index(t[:5]+ex+'out')*100]): #imets[t[:5]+'out']['z'][0] > outlet_aws[2]+10:
+                if add_outlet_obs == True:
+                    print ('adding outlet near-surface observation and interpolating linearly up to start of vertical profile')
+                    first_nonnan = np.where(np.isnan(xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'out')*100])==False)[0][0]
+                    #print (xyspacenew[:40,list(imets.keys()).index(t[:5]+ex+'out')*100])
+                    #xyspacenew[0,list(imets.keys()).index(t[:5]+ex+'inl')*100] = 
+                    xyspacenew[0,list(imets.keys()).index(t[:5]+ex+'out')*100] = NV.loc[NV['date']>=date,'t'].iloc[0]
+                    #print (xyspacenew[:40,list(imets.keys()).index(t[:5]+ex+'out')*100])
+                    first_nan = np.where(np.isnan(xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'out')*100]))[0][0]
+            
+                    x = np.array([first_nan-1, first_nonnan])#, 1)
+                    y = xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'out')*100]#[first_nan-1:first_nonnan+1]
+                    y = np.array([y[first_nan-1],y[first_nonnan]])
+                    f = interpolate.interp1d(x, y, kind='linear', bounds_error=False, fill_value='extrapolate')
+                    x_new = np.arange(first_nan, first_nonnan, 1)
+                    xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'out')*100][first_nan:first_nonnan] = f(x_new)
+                    #print (x, y, x_new, f(x_new))
+                    #print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'out')*100][first_nan:first_nonnan])
+                    #print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'inl')*100])
+                else:
+                    print ('adding outlet observation without interpolating up')
+                    xyspacenew = add_obs(xyspacenew, xs, zs, 'outlet', xind_outlet, var=var)
+    if var == 't' or var == 'rh':
+        try:
+            imets[t[:5]+ex+'inl']
+        except:
+            print ('adding inlet observation without interpolating up')
+            xyspacenew = add_obs(xyspacenew, xs, zs, 'inlet', xind_inlet, var=var)
+        else:
+            if np.isnan(xyspacenew[0,list(imets.keys()).index(t[:5]+ex+'inl')*100]):
+            #if imets[t[:5]+'inl']['z'][0] > inlet_aws[2]+10:
+                if add_inlet_obs == True:
+                    try:
+                        first_nonnan = np.where(np.isnan(xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'inl')*100])==False)[0][0]
+                    except:
+                        print ('adding inlet observation without interpolating up')
+                        xyspacenew = add_obs(xyspacenew, xs, zs, 'inlet', xind_inlet, var=var)
+                    else:
+                        print ('adding inlet near-surface observation and interpolating linearly up to start of vertical profile')
+                        #print (xyspacenew[:20,list(imets.keys()).index(t[:5]+ex+'inl')*100])
+                        #xyspacenew[0,list(imets.keys()).index(t[:5]+ex+'inl')*100] = 
+                        if var == 't':
+                            xyspacenew[0,list(imets.keys()).index(t[:5]+ex+'inl')*100] = FF.loc[FF['date']>=date,'T'].iloc[0]
+                        elif var == 'rh':
+                            xyspacenew[0,list(imets.keys()).index(t[:5]+ex+'inl')*100] = FF.loc[FF['date']>=date,'RH'].iloc[0]
+                        #xyspacenew = add_obs(xyspacenew, xs, zs, 'inlet')
+                        #print (xyspacenew[:20,list(imets.keys()).index(t[:5]+ex+'inl')*100])
+                        first_nan = np.where(np.isnan(xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'inl')*100]))[0][0]
+                
+                        x = np.array([first_nan-1, first_nonnan])#, 1)
+                        y = xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'inl')*100]#[first_nan-1:first_nonnan+1]
+                        y = np.array([y[first_nan-1],y[first_nonnan]])
+                        f = interpolate.interp1d(x, y, kind='linear', bounds_error=False, fill_value='extrapolate')
+                        x_new = np.arange(first_nan, first_nonnan, 1)
+                        xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'inl')*100][first_nan:first_nonnan] = f(x_new)
+                        #print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'inl')*100][first_nan:first_nonnan])
+                        #print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'inl')*100])
+                else:
+                    print ('adding inlet observation without interpolating up')
+                    xyspacenew = add_obs(xyspacenew, xs, zs, 'inlet', xind_inlet, var=var)
+            
+    #        print ('adding outlet observation because profile starts more than 10 m above surface')
+    #        print (xyspacenew[:,list(imets.keys()).index(t[:5]+ex+'out')*100])
+    
+    # adding humilog observations
+    #print (xyspacenew[0:5,intpts.index(closest_point_tonlow)*10])
+    if var == 't':
+        xyspacenew[1,intpts.index(closest_point_tonlow)*10] = humilog_lower.loc[humilog_lower['date']>=date,'T'].iloc[0]
+        xyspacenew[1,intpts.index(closest_point_tonup)*10] = humilog_upper.loc[humilog_upper['date']>=date,'T'].iloc[0]
+    elif var == 'rh':
+        xyspacenew[1,intpts.index(closest_point_tonlow)*10] = humilog_lower.loc[humilog_lower['date']>=date,'RH'].iloc[0]
+        xyspacenew[1,intpts.index(closest_point_tonup)*10] = humilog_upper.loc[humilog_upper['date']>=date,'RH'].iloc[0]
+    #print (xyspacenew[0:5,intpts.index(closest_point_tonlow)*10])
+    
+    
+    # setting the surface temperature equal to 0 deg over the melting glacier
+    xyspacenew[0,np.where(x_plot == xind_front)[0][0]+1:] = 0
+    # setting the surface temperature equal to 3 deg over the proglacial lake (average lake temp during IOP)
+    xyspacenew[0,1:np.where(x_plot == xind_inlet)[0][0]] = 4
+    
+    
+    
+    # Interpolate NaN values in the xyspacenew array
+    for row in xyspacenew:
+        mask = np.isnan(row)   # identify nans
+        x = np.where(~mask)[0] # first value on row without nan
+        y = row[~mask]         # values on row without nan
+        #print (row, y, x)
+        if len(x) > 1:  # Make sure there are at least two points to interpolate
+            f = interpolate.interp1d(x, y, kind='linear', bounds_error=False, fill_value='extrapolate')
+            x_new = np.where(mask)[0] # Only interpolate points that are NaN
+            x_new_valid = x_new[(x_new >= min(x)) & (x_new <= max(x))] # only interpolate points within the range of x
+            row[mask] = np.nan  # Set all masked values to NaN for now
+            row[x_new_valid] = f(x_new_valid)  # Only interpolate valid points
+        else:
+            #If there are fewer than two points, leave the NaN values as they are
+            continue
+    
+    # shift columns up to altitude level
+    for idx, col in enumerate(xyspacenew.T):
+        z_shift = int(intalts_extended[idx])-start_level
+        col[z_shift:] = col[:-z_shift]
+        col[:z_shift] = np.nan
+    
+    
+    # prepare plot
+    
+    cmap = plt.cm.coolwarm#RdBu_r#viridis#
+    if var == 't':
+        vmin, vmax = 278,284
+        cblab = 'air temperature (\u00b0C)'#K)'#
+    elif var == 'rh':
+        vmin, vmax = 30,90
+        cblab = 'relative humidity (%)'
+        cmap = plt.cm.RdBu
+    elif var == 'pt':
+        vmin, vmax = 278, 288 #8,14
+        cblab = 'potential temperature (K)'#\u00b0C)'
+    norm = Normalize(vmin=vmin, vmax=vmax)
+    levels = np.linspace(vmin, vmax, 16)
+    mappable = ScalarMappable(norm=norm, cmap=cmap)
+    
+    add = 0
+    if var == 't':
+        add = 273.15
+        
+    def add_observations(ax):
+        for df, alt in zip(imets, intalts_extended[::100]):
+            df = imets[df]
+            if np.min(df['z']) < alt: # shift profiles up if they start too low
+                df['z'] += alt-np.min(df['z'])
+                print (np.min(df['z']), alt, intalts_extended[-1]-np.min(df['z']))
+            ax.scatter(df['xind'][::3],df['z'][::3],c=df[var][::3]+add, ec='k', marker='o', s=10, cmap=cmap, norm=norm, zorder=900)
+            scatter = ax.scatter(df['xind'][::3],df['z'][::3],c=df[var][::3]+add, ec='none', marker='o', s=8, cmap=cmap, norm=norm, zorder=1000)
+            #dfxind,dfz = np.meshgrid(df['xind'],df['z'])
+            #plt.pcolormesh(dfxind,dfz,df[var])
+        
+    #    if t[:5] == '12-11':       
+    #        ax.scatter(np.ones(len(RS2.loc[:RS2_ind]))*xind_front, RS2.loc[:RS2_ind,'z'], c=RS2.loc[:RS2_ind,var]+add, ec='k', marker='s', s=12, cmap=cmap, norm=norm, zorder=900)
+    #        scatter = ax.scatter(np.ones(len(RS2.loc[:RS2_ind]))*xind_front, RS2.loc[:RS2_ind,'z'], c=RS2.loc[:RS2_ind,var]+add, ec='none', marker='s', s=10, cmap=cmap, norm=norm, zorder=1000)
+    #    if t[:5] == '13-5-':       
+    #        ax.scatter(np.ones(len(RS4.loc[:RS4_ind]))*xind_front, RS4.loc[:RS4_ind,'z'], c=RS4.loc[:RS4_ind,var]+add, ec='k', marker='s', s=12, cmap=cmap, norm=norm, zorder=900)
+    #        scatter = ax.scatter(np.ones(len(RS4.loc[:RS4_ind]))*xind_front, RS4.loc[:RS4_ind,'z'], c=RS4.loc[:RS4_ind,var]+add, ec='none', marker='s', s=10, cmap=cmap, norm=norm, zorder=1000)
+            
+        if var == 't':
+            sc1 = ax.scatter(xind_glacier,glacier_aws[2]+2.79,c=ttNB.loc[ttNB['date_N5_']==date,'t_N5_']+add, ec='k', marker='o', s=100, cmap=cmap, norm=norm, zorder=1000)
+            sc2 = ax.scatter(xind_glacier,glacier_aws[2]+1.79,c=ttNB.loc[ttNB['date_N3_']==date,'t_N3_']+add, ec='k', marker=MarkerStyle('o', fillstyle='bottom'), s=100, cmap=cmap, norm=norm, zorder=1100)
+            #plt.scatter(xind_glacier,glacier_aws[2],c=ttNB.loc[ttNB['date_N3_']==date,'t_N3_'], ec='k', marker='o', s=10, cmap=cmap, norm=norm, zorder=1000)
+            #plt.scatter(xind_glacier,glacier_aws[2],c=np.mean([NB.loc[NB['date']<date, 't_u'].iloc[-1],NB.loc[NB['date']>date, 't_u'].iloc[0]]), ec='k', marker='^', s=200, cmap=cmap, norm=norm, zorder=1000)
+            if t[:2] == '13':
+                sc3 = ax.scatter(x_plot[0],outlet_aws[2]+5,c=NV.loc[NV['date']>=date,'t'].iloc[0]+add, ec='k', marker='o', s=100, cmap=cmap, norm=norm, zorder=1000)
+            else:
+                sc3 = sc2
+        if var == 't':
+            var2 = 'T'
+        elif var == 'rh':
+            var2 = 'RH'
+        ax.scatter(xind_tonup,intalts[intpts.index(closest_point_tonup)],c=humilog_upper.loc[humilog_upper['date']>=date,var2].iloc[0]+add, ec='k', s=50, marker='o', cmap=cmap, norm=norm, zorder=1000)
+        ax.scatter(xind_tonlow,intalts[intpts.index(closest_point_tonlow)],c=humilog_lower.loc[humilog_upper['date']>=date,var2].iloc[0]+add, ec='k', s=50, marker='o', cmap=cmap, norm=norm, zorder=1000)
+        sc4 = ax.scatter(xind_inlet,intalts[intpts.index(closest_point_inlet)],c=FF.loc[FF['date']>=date,var2].iloc[0]+add, ec='k', marker='o', s=100, cmap=cmap, norm=norm, zorder=1000)
+        return ax, sc1, sc2, sc3, sc4
+    
+    
+    # add ice thickness
+    df = pd.read_excel('data/nigard_ice.xlsx')
+    df.columns = ['lon', 'lat', 'elevation', 'thickness']
+    
+    intpts_extended = interpolate_array(intpts, len(intpts), 10, 'coord')
+    
+    from scipy.spatial import KDTree
+    coordinates = df[['lon', 'lat']].values
+    tree = KDTree(coordinates)
+    
+    thickness_array = []
+    for coord in intpts_extended:
+        dis, idx = tree.query(coord)
+        thickness = df['thickness'].iloc[idx]
+        thickness_array.append(thickness)
+    thickness_array = np.array(thickness_array)
+    thickness_array[thickness_array < 5] = 0
+    
+    
+    # estimate point on interpolation line for all UAV measurements in imets:
+    for df in imets:
+        df = imets[df]
+        df['xind'] = df['z']
+        for i in range(len(df)):
+            closest_point = min(intpts, key=lambda x: (Point(df.loc[i]['lat'],df.loc[i]['lon'])).distance(Point(x)))
+            df.loc[i,'xind'] = intdist[intpts.index(closest_point)]
+    
+    if var == 'pt':
+        pt_contours = xyspacenew
+    
+    
+    # plot
+    
+    ff=.8
+    
+    if t[:2] == '13':
+        fig,ax1 = plt.subplots(1, figsize=(8*3/4*ff*.84, 6*ff), dpi=200)
+    elif t[:2] == '14':
+        fig,ax1 = plt.subplots(1, figsize=(5*32/54*ff*1.08, 6.3*ff), dpi=200)
+    
+    plt.style.use('seaborn-v0_8-talk')
+    #plt.plot(x_plot, intalts_extended, c='k', zorder=100)
+    ax1.fill_between(x_plot, intalts_extended, start_level, linestyle='-', color='k', zorder=10)
+    ax1.fill_between(x_plot, intalts_extended-thickness_array, intalts_extended, linestyle='-', color='paleturquoise', zorder=10)
+    ax1.fill_between([-30,0], [intalts_extended[0], intalts_extended[0]], start_level, linestyle='-', color='k', zorder=10)
+    ax1.fill_between([-30,0], [intalts_extended[0]-thickness_array[0], intalts_extended[0]-thickness_array[0]], [intalts_extended[0], intalts_extended[0]], linestyle='-', color='paleturquoise', zorder=10)
+    ax1.fill_between([5526, 5558], 0, intalts_extended[-1], linestyle='-', color='k', zorder=10)
+    ax1.fill_between([5526, 5558], intalts_extended[-1]-thickness_array[-1], intalts_extended[-1], linestyle='-', color='paleturquoise', zorder=10)
+
+    print (var)
+    if var == 't' or var == 'rh':
+        cntr1 = ax1.contourf(xs,zs,xyspacenew+add, cmap=cmap, norm=norm, levels=levels, extend='both', zorder=800)
+        ax1, sc1, sc2, sc3, sc4 = add_observations(ax1)
+        sc1.set_clip_on(False)
+        sc2.set_clip_on(False)
+        sc3.set_clip_on(False)
+        sc4.set_clip_on(False)
+        c2 = ax1.contour(xs, zs, gaussian_filter(pt_contours, sigma=3), colors='k', linewidths=1, levels=np.arange(270,300,1), zorder=900)#270,300,1), zorder=900)
+        #c2 = ax1.contour(xs, zs, gaussian_filter(pt_contours, sigma=3)-273.15, colors='k', linewidths=1, levels=np.arange(0,12,1), zorder=900)#270,300,1), zorder=900)
+        manual_loc = [(1,500),(200,200),(800,800),(1200,700)]
+        #ax1.clabel(c2, inline=True, fontsize=12)
+    if var == 'pt':
+        cntr1 = ax1.contourf(xs, zs, gaussian_filter(pt_contours, sigma=3), cmap=cmap, norm=norm, levels=15, zorder=800)
+    #cntr1 = plt.pcolormesh(xs,zs,xyspacenew, cmap=cmap, norm=norm, zorder=1000) #"RdBu_r"
+    #cntr1 = plt.pcolormesh(xs,zs,gaussian_filter(xyspacenew, sigma=1), cmap=cmap, norm=norm, zorder=1000) #"RdBu_r"
+    
+    # add lines for lake (and glacier?)
+    try:
+        ind = list(imets.keys()).index(t[:5]+ex+'inl')*100
+    except:
+        try:
+            ind = list(imets.keys()).index(t[:5]+ex+'inlet')*100
+        except:
+            print ('cannot find lake inlet')
+            ind = np.where(x_plot == xind_inlet)[0][0]
+            ax1.plot(x_plot[:ind-5], [i-5 for i in intalts_extended[:ind-5]], c='turquoise', lw=5, alpha=.6, zorder=500)
+        else:
+            ax1.plot(x_plot[:ind-5], [i-5 for i in intalts_extended[:ind-5]], c='turquoise', lw=5, alpha=.6, zorder=500)
+            print ('plotting lake line')
+    else:
+        ax1.plot(x_plot[:ind-5], [i-5 for i in intalts_extended[:ind-5]], c='turquoise', lw=5, alpha=.6, zorder=500)
+        print ('plotting lake line')
+    try:
+        ind = list(imets.keys()).index(t[:5]+ex+'fro')*100
+    except:
+        print ('cannot find front')
+        ind = xind_front
+        ax1.plot(x_plot[ind+shift:], [i-5 for i in intalts_extended[ind+shift:]], c='turquoise', lw=5)
+    else:
+        shift = 10
+        #ax1.plot(x_plot[ind+shift:], [i-8 for i in intalts_extended[ind+shift:]], c='lightgrey', lw=5, zorder=500)
+        print ('plotting glacier line')
+    
+    #cb = plt.colorbar(cntr1, ax=ax1, extend='both', orientation='horizontal')#'vertical')#
+    #cb.set_label(cblab)#, rotation=270, labelpad=15)
+    #cb.set_ticks(levels[::5])
+    
+    # add labels for locations
+    fs = 14
+    ax1.text(xind_glacier-130, 203+35, 'G', color=c[9], ha='center', va='bottom', rotation=0, fontsize=fs, zorder=1000, 
+            bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    if t[:2] == '13':
+        ax1.text(dist[-2], 203+35, 'F', color=c[7], ha='center', va='bottom', rotation=0, fontsize=fs, zorder=1000, 
+                bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    elif t[:2] == '14':
+        ax1.text(xind_front, 203+35, 'F', color=c[7], ha='center', va='bottom', rotation=0, fontsize=fs, zorder=1000, 
+                bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    if t[:5] == '13-5-':
+        ax1.text(dist[1]*0.7, 203+35, 'I', color=c[1], ha='center', va='bottom', rotation=0, fontsize=fs, zorder=1000, 
+                bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    elif t[:2] == '13':
+        ax1.text(dist[-3], 203+35, 'I', color=c[1], ha='center', va='bottom', rotation=0, fontsize=fs, zorder=1000, 
+                bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    elif t[:2] == '14':
+        ax1.text(xind_inlet+70, 203+35, 'I', color=c[1], ha='center', va='bottom', rotation=0, fontsize=fs, zorder=1000, 
+                bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    if t[:5] == '13-13':
+        ax1.text(dist[1], 203+35, 'L', color='y', ha='center', va='bottom', rotation=0, fontsize=fs, zorder=1000, 
+                bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    if t[:2] == '13':
+        ax1.text(dist[0]+140, 203+35, 'O', color=c[6], ha='center', va='bottom', rotation=0, fontsize=fs, zorder=100, #dist[0]+70
+                bbox=dict(facecolor='none', edgecolor='none', lw=1.5))
+    
+    ax1.set_xlabel('distance along centerline (km)')
+    if t[:2] == '14':
+        ax1.set_xlabel('dist. along centerline (km)')
+    ax1.set_ylabel('elevation (m a.s.l.)')
+    ax1.set_xlim(x_plot[0]-30,x_plot[-1]+30)
+    if t[:5] == '14-5-' or t[:5] == '14-13':
+        ax1.set_xlim(xind_inlet-30,x_plot[-1]+30)
+    elif t[:5] == '14-7-' or t[:5] == '14-10':
+        ax1.set_xlim(xind_inlet-30,xind_glacier+30)
+    ax1.invert_xaxis()
+    if t[:2] == '14':
+        ax1.set_xticks(np.arange(ax1.get_xlim()[0]-30-2000,ax1.get_xlim()[0]+1,1000)) #ax1.get_xlim()[0]-80-5000,
+        ax1.set_xticklabels(np.flip(np.arange(0,3,1)))
+    else:
+        ax1.set_xticks(np.arange(ax1.get_xlim()[0]-30-5000,ax1.get_xlim()[0]+1,1000)) #ax1.get_xlim()[0]-80-5000,
+        ax1.set_xticklabels(np.flip(np.arange(0,6,1)))
+    ax1.fill_between([-30,0], [intalts_extended[0],intalts_extended[0]], start_level, linestyle='-', color='k', zorder=100) # repair edges
+    if t[:2] == '13' or t[:5] == '14-5-':
+        ax1.fill_between([xind_glacier-30,ax1.get_xlim()[0]], [intalts_extended[-1],intalts_extended[-1]], start_level, linestyle='-', color='k', zorder=100) # repair edges
+    #    ax1.fill_between([xind_glacier-33,xind_glacier-5], [intalts_extended[-1]-thickness_array[-1]], [intalts_extended[-1]], linestyle='-', color='paleturquoise', zorder=110)
+        ax1.fill_between([xind_glacier-39,xind_glacier+25], [intalts_extended[-1]-thickness_array[-1]], [intalts_extended[-1]], linestyle='-', color='paleturquoise', zorder=110)
+    #elif t[:2] == '14':
+    #    ax1.fill_between([xind_glacier-53,xind_glacier+25], [intalts_extended[-1]-thickness_array[-1]], [intalts_extended[-1]], linestyle='-', color='paleturquoise', zorder=110)
+    ax1.set_ylim(start_level+40,730)#940#np.max(zs))
+    
+    if t[3:4] == '5':
+        lab = 'a'
+    elif t[3:5] == '10':
+        lab = 'b'    
+    elif t[3:5] == '13':
+        lab = 'c'
+    
+    if t[:2] == '13':
+        ax1.set_title(f'{lab})     {str(date)[8:10]} Sept. {str(date)[-8:-3]}       ')
+    else:
+        ax1.set_title(f'{lab}) {str(date)[8:10]} Sept.\n{str(date)[-8:-3]}')
+    
+    
+    plt.tight_layout()
+    #plt.savefig(f'data/interpolation/figures/colorbar.png')
+    if var == 't':
+        plt.savefig(f'data/interpolation/figures/{var}_{t[:5]}_linear.pdf')
+        plt.show()
+
+    elif var=='pt':
+        return pt_contours

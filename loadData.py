@@ -344,6 +344,9 @@ RS4 = RS4.loc[236:].reset_index(drop=True)
 RS2['pt'] = (RS2['t']+273.15)*(1013/RS2['p'])**(0.286)
 RS4['pt'] = (RS4['t']+273.15)*(1013/RS4['p'])**(0.286)
 
+RS2_ind = np.where(abs(RS2.loc[0,'lat']-RS2['lat'])>0.003)[0][0]
+RS4_ind = np.where(abs(RS4.loc[0,'lat']-RS4['lat'])>0.003)[0][0]
+
 # --------------------------------------------------------------------
 # iMet data
 # --------------------------------------------------------------------
@@ -438,8 +441,8 @@ for fn in sorted(fns)[:]:
     tt = pd.DataFrame(pd.read_excel(fn, usecols="B,C")[4:])
     #tt['min'] = tt['Time'].dt.minute.convert_dtypes()
     #tt = tt.loc[tt['min']==0].reset_index() # for easier comparison
-    ttNB['date_'+fn[12:15]] = tt['Time']#+pd.Timedelta(hours=2) # convert to local summer time
-    ttNB['t_'+fn[12:15]] = tt[1]
+    ttNB['date_'+fn[17:20]] = tt['Time']#+pd.Timedelta(hours=2) # convert to local summer time
+    ttNB['t_'+fn[17:20]] = tt[1]
 
 # read tinytag data from paraglider
 path = 'data/paraglider/'
