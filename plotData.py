@@ -1,22 +1,28 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import geopandas as gpd
-from datetime import datetime, timedelta
+import matplotlib.colors as mcolors
 import matplotlib.dates as mdates
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes, zoomed_inset_axes
+import matplotlib.gridspec as gridspec
+from matplotlib.markers import MarkerStyle
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+from matplotlib.ticker import LogFormatter 
+
+import xarray as xr
+import geopandas as gpd
+from netCDF4 import Dataset
+from datetime import datetime, timedelta
 from pyproj import Transformer
+from pyproj import Geod
 from shapely.geometry import Point, LineString
 import rasterio
 from rasterio.transform import rowcol
 import ast
-from pyproj import Geod
 from scipy.ndimage import gaussian_filter
-import matplotlib.gridspec as gridspec
 from scipy import interpolate
-from matplotlib.colors import Normalize
-from matplotlib.cm import ScalarMappable
-from matplotlib.markers import MarkerStyle
+import geopy.distance
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes, zoomed_inset_axes
 
 # CONTENTS
 
@@ -2080,3 +2086,676 @@ def interpolateUAV_p2(var='t', date=date, pt_contours=None):
 
     elif var=='pt':
         return pt_contours
+
+
+
+# --------------------------------------------------------------------
+# plot surface data from wrf and observations
+# --------------------------------------------------------------------
+
+def findClosestGridPoints(lat=61.659, lon=7.276, data=WRF_3D):
+
+    sn_red = 45
+    we_red = 50
+
+    #la,lo = wrf.ll_to_xy(data,lat,lon)[::-1].values
+    if lat==61.659 and lon==7.276:
+        la,lo = 48,78 #57,85
+    elif lat==61.687 and lon==7.197:
+        la,lo = 57, 65
+    elif lat==61.67595235467888 and lon==7.211611010507808:
+        la,lo = 53, 68 #54,67
+    elif lat==61.6672661 and lon==7.2415509:
+        la,lo = 50,72
+    la -= sn_red
+    lo -= we_red
+        
+    
+    if   ((data['XLAT'][0][la,lo] < lat) & (data['XLONG'][0][la,lo] < lon)):
+        #print ('<<', la, lo, la+1, lo+1)
+        las = [la,la,la+1,la+1]; los = [lo,lo+1,lo+1,lo]
+    elif ((data['XLAT'][0][la,lo] > lat) & (data['XLONG'][0][la,lo] < lon)):
+        #print ('><', la, lo, la+1, lo-1)
+        las = [la,la,la-1,la-1]; los = [lo,lo+1,lo+1,lo]
+    elif ((data['XLAT'][0][la,lo] > lat) & (data['XLONG'][0][la,lo] > lon)):
+        #print ('>>', la, lo, la-1, lo-1)
+        las = [la,la,la-1,la-1]; los = [lo,lo-1,lo-1,lo]
+    elif ((data['XLAT'][0][la,lo] < lat) & (data['XLONG'][0][la,lo] > lon)):
+        #print ('<>', la, lo, la-1, lo+1)
+        las = [la,la,la+1,la+1]; los = [lo,lo-1,lo-1,lo]
+        
+    #print ('coordinates of station', (lat,lon))
+    distances = []
+    for la,lo in zip(las,los):
+        distances.append(geopy.distance.geodesic((lat,lon),(data['XLAT'][0][la,lo],data['XLONG'][0][la,lo])).m)
+        
+    return (las,los,distances)
+
+def InverseDistanceWeighted(lat,lon,var='T2',data=WRF):
+    #if len(data) == len(WRF400):
+    #    #print ('using WRF400 data')
+    #    #WRF_3D = Dataset('WRF_data/2021_july_400m/wrfuserout_d03_2021-07-01_00:00:00')
+    #    WRF_3D = Dataset('WRF_data/2021_JJA/ssthigh/wrfuserout_d03_2021-07-01_00:00:00')
+    #else:
+    #    #print ('using WRF1000 data')
+    #    WRF_3D = Dataset('WRF_data/2021_JJA/sstlow/wrfout_d03_2021-07-01_00:00:09')
+    #    WRF_3D = Dataset('WRF_data/2021_JJA/sstlow/wrfout_d03_2021-06-01_00:00:00')
+    las,los,dis = (findClosestGridPoints(lat=lat,lon=lon,data=WRF_3D))
+    if var == 'UVMET':
+        weighted_u = []
+        weighted_v = []
+        #print (len(data['bottom_top']))
+        for k in range(len(data['bottom_top'])):
+            var4pts_u = []
+            var4pts_v = []
+            for i,j in zip(los,las):
+                #print (i,j)
+                #moddata_u = 
+                #moddata_v = 
+                #data.loc[(data['bottom_top']==k)&(data['south_north']==j)&(data['west_east']==i),var].reset_index(drop=True)
+                #print (np.shape(moddata))
+                var4pts_u.append(UVMET[0,:,k,j,i])#moddata_u)
+                var4pts_v.append(UVMET[1,:,k,j,i])#moddata_v)
+            #print (var4pts_u)
+            weighted_u.append( (var4pts_u[0]/dis[0]+var4pts_u[1]/dis[1]+var4pts_u[2]/dis[2]+var4pts_u[3]/dis[3])/(1/dis[0]+1/dis[1]+1/dis[2]+1/dis[3]))
+            weighted_v.append( (var4pts_v[0]/dis[0]+var4pts_v[1]/dis[1]+var4pts_v[2]/dis[2]+var4pts_v[3]/dis[3])/(1/dis[0]+1/dis[1]+1/dis[2]+1/dis[3]))
+            #print (np.shape(weighted_u))
+        weighted = [weighted_u,weighted_v]
+    elif var == 'T':
+        weighted = []
+        #print (len(data['bottom_top']))
+        for k in range(len(data['bottom_top'])):
+            var4pts = []
+            for i,j in zip(los,las):
+                moddata = data.loc[(data['bottom_top']==k)&(data['south_north']==j)&(data['west_east']==i),var].reset_index(drop=True)
+                var4pts.append(moddata)
+            #print (var4pts_u)
+            weighted.append( (var4pts[0]/dis[0]+var4pts[1]/dis[1]+var4pts[2]/dis[2]+var4pts[3]/dis[3])/(1/dis[0]+1/dis[1]+1/dis[2]+1/dis[3]))
+            print ('shape weighted: ', np.shape(weighted))
+               
+    else:
+        var4pts = []
+        for i,j in zip(los,las):
+            #print (i,j)
+            moddata = data.loc[(data['south_north']==j)&(data['west_east']==i),var].reset_index(drop=True)
+            #print (np.shape(moddata))
+            var4pts.append(moddata)
+        weighted = (var4pts[0]/dis[0]+var4pts[1]/dis[1]+var4pts[2]/dis[2]+var4pts[3]/dis[3])/(1/dis[0]+1/dis[1]+1/dis[2]+1/dis[3])
+    return weighted
+
+    
+def plotTemperatureEvolution():
+
+    WRF1000_ts = pd.read_csv('data/wrf_files/WRF1000_ts.csv')
+    WRF400_ts = pd.read_csv('data/wrf_files/WRF400_ts.csv')
+
+    WRF = xr.open_mfdataset('data/wrf_files/wrfout_d03_surface.nc')
+
+    WRF['Times'] = (WRF['Times'].astype(np.unicode_))
+    WRF = (WRF.to_dataframe()).reset_index()
+    WRF['Times'] = pd.to_datetime(WRF['Times'], format='%Y-%m-%d_%H:%M:%S')
+    WRF = WRF.rename(columns={"Times": "date"})
+    
+    WRF['station_id'] = ''
+    for s in range(len(WRF1000_ts['station_id'].unique())):
+        (WRF.loc[(WRF['south_north']==np.array(WRF1000_ts.loc[~WRF1000_ts.grid_j.eq(WRF1000_ts.grid_j.shift()),'grid_j'])[s]) & \
+         (WRF['west_east']==np.array(WRF1000_ts.loc[~WRF1000_ts.grid_i.eq(WRF1000_ts.grid_i.shift()),'grid_i'])[s]),'station_id']) = WRF1000_ts['station_id'].unique()[s]
+    
+    # express temperature in celcius for comparison with other datasets
+    WRF['T2'] -= 273.15
+    
+    # calculate wind speed and direction
+    WRF['WS'] = np.sqrt(WRF['U10']**2+WRF['V10']**2)
+    WRF['WD'] = (np.arctan2(WRF['V10']/WRF['WS'],WRF['U10']/WRF['WS'])*180/np.pi)
+    WRF['WD'] += 180
+    WRF['WD'] = 90 - WRF['WD']
+    WRF['WD'] = (WRF['WD']%360)
+
+    WRF400 = xr.open_mfdataset('data/wrf_files/wrfout_d04_surface.nc')
+    
+    WRF400['Times'] = (WRF400['Times'].astype(np.unicode_))
+    WRF400 = (WRF400.to_dataframe()).reset_index()
+    WRF400['Times'] = pd.to_datetime(WRF400['Times'], format='%Y-%m-%d_%H:%M:%S')
+    WRF400 = WRF400.rename(columns={"Times": "date"})
+    
+    WRF400['station_id'] = ''
+    for s in range(len(WRF400_ts['station_id'].unique())):
+        (WRF400.loc[(WRF400['south_north']==np.array(WRF400_ts.loc[~WRF400_ts.grid_j.eq(WRF400_ts.grid_j.shift()),'grid_j'])[s])&(WRF400['west_east']==np.array(WRF400_ts.loc[~WRF400_ts.grid_i.eq(WRF400_ts.grid_i.shift()),'grid_i'])[s]), 'station_id']) = WRF400_ts['station_id'].unique()[s]
+    
+    # express temperature in celcius for comparison with other datasets
+    WRF400['T2'] -= 273.15
+    
+    # calculate wind speed and direction
+    WRF400['WS'] = np.sqrt(WRF400['U10']**2+WRF400['V10']**2)
+    WRF400['WD'] = (np.arctan2(WRF400['V10']/WRF400['WS'],WRF400['U10']/WRF400['WS'])*180/np.pi)
+    WRF400['WD'] += 180
+    WRF400['WD'] = 90 - WRF400['WD']
+    WRF400['WD'] = (WRF400['WD']%360)
+    
+    WRF_3D_d04 = Dataset('data/wrf_files/wrfout_d04_3D_warm-lake.nc')
+    WRF_3D = WRF_3D_d04
+    
+    # figure for paper
+    
+    lw  = .3
+    s   = 50
+    alp = .3
+    lw2 = 2.2
+    c = [u'#1f77b4', u'#ff7f0e', u'#2ca02c', u'#d62728', u'#9467bd', u'#8c564b', u'#e377c2', u'#7f7f7f', u'#bcbd22', u'#17becf']
+    
+    locnames = ['valley', 'glacier', 'inlet', 'valley2', 'outlet']
+    
+    WRF1000_label = '1000 m'; WRF400_label = '333 m'
+    
+    start = datetime(2023,9,13)#00,1,1)#2024,1,1)#12)
+    end   = datetime(2023,9,15)#00,9,30)#2024,1,31)#15)
+    
+    plt.rcParams.update({'font.size': 19})#22})
+    f,ax = plt.subplots(figsize=(15,8.5))
+    
+    # observations
+    #ax = plotTimeSeries(data=MET_hourly,station_id=MET_hourly['station_id'].unique()[:1],variable='t') #c[2]
+    ax.set_ylabel('temperature (\u00b0C)')
+    ax.scatter(NB['date'],NB['t_u'],s=s,c=c[9],ec='k',lw=lw,label='glacier',zorder=100)
+    ax.scatter(FF['date'],FF['T'],s=s,c=c[1],ec='k',lw=lw,label='inlet',zorder=100)
+    ax.scatter(NV['date'],NV['t'],s=s,c=c[6],ec='k',lw=lw,label='outlet',zorder=100)
+    ax.scatter(MG['date'],MG['T'],s=s,c=c[2],ec='k',lw=lw,label='valley1',zorder=100)
+    #ax.scatter(BH['date'],BH['t'],s=s,c=c[5],ec='k',lw=lw,label='valley2')
+    #ax.plot(era5['time'],era5['t2m'][:,era5_1000_j[0],era5_1000_i[0]],lw=4,alpha=.2,c='k',label=f'ERA5',zorder=-999)# {loc}')
+    
+    ax.scatter((), (), marker='o', c='grey', lw=1.5, label='AWS')
+    #line, = 
+    ax.plot((), (), marker='o', c='lightgrey', markerfacecolor='w', lw=1.5, label='1000 m (1 pt)')
+    ax.plot((), (), marker='o', c='grey', markerfacecolor='w', lw=1.5, label='333 m (1 pt)')
+    ax.plot((), (), marker='s', c='grey', markerfacecolor='w', lw=1.5, label='333 m (4 pts)')
+    
+    handles1, labels1 = ax.get_legend_handles_labels()
+    legend1 = ax.legend(handles1[:4], labels1[:4], ncol=1, loc=2)
+    ax.add_artist(legend1)
+    legend2 = ax.legend(handles1[4:8], labels1[4:8], ncol=1, loc=4)
+    #fig.add_artist(legend2)
+    
+    ax.axvspan(xmin=datetime(2023,9,13), xmax=datetime(2023,9,14), ymin=0, ymax=1, facecolor='grey', alpha=0.1)
+    
+    # simulations
+    stations = ['MG','NB','FF','NV']
+    for st,loc,ln in zip([0,1,12,13],stations[:2]+[stations[-2]]+[stations[-1]],locnames[:3]+[locnames[-1]]):#stations):
+        if st == 0: # valley
+            ci = 2
+        if st == 1: # glacier
+            ci = 9
+        elif st == 11: # valley2
+            ci = 5
+        if st == 12: # inlet
+            ci = 1
+        elif st == 13: # outlet
+            ci = 6
+        lat = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'station_lat'].iloc[0]
+        lon = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'station_lon'].iloc[0]
+        #if st == 12:
+        #    print ('shifting lat, lon of inlet away from water point')
+        #    print (lat, lon)
+        #    lon -= .003; lat += .002
+        print (loc, lat, lon, ln)
+        if ln == 'valley' or ln == 'glacier':
+            weighted = InverseDistanceWeighted(lat=lat,lon=lon,var='T2',data=WRF)
+        else:
+            weighted = np.load(f'data/wrf_profiles-and-timeseries/surface_temp/T2_warmlake_{ln}.npy')
+        i,j = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_i'].unique()[0], WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_j'].unique()[0]
+        #if st == 12:
+        #    print ('shifting i,j of inlet away from water point')
+        #    i -= 1; j += 1
+        modeldata = WRF.loc[(WRF['south_north']==j)&(WRF['west_east']==i),['date','T2']].reset_index(drop=True)
+        ax.plot   (modeldata['date']+pd.Timedelta(hours=2),modeldata['T2'],c=c[ci], alpha=alp, zorder=10)
+        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),modeldata['T2'],c='w',ec='none',zorder=10)
+        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),modeldata['T2'],c='w',ec=c[ci], alpha=alp,label=f'{WRF1000_label} {ln} (1 pt)',zorder=10)
+    
+        WRF_3D = WRF_3D_d04
+        #if ln == 'valley' or ln == 'glacier':
+        #    weighted = InverseDistanceWeighted(lat=lat,lon=lon,var='T2',data=WRF400)
+        #else:
+        weighted = np.load(f'data/wrf_profiles-and-timeseries/inverse-distance-weighted/T2_warmlake_{loc}.npy')
+        i,j = WRF400_ts.loc[WRF400_ts['station_id']==loc,'grid_i'].unique()[0], WRF400_ts.loc[WRF400_ts['station_id']==loc,'grid_j'].unique()[0]
+        #if st == 12:
+        #    print ('shifting i,j of inlet away from water point')
+        #    i -= 1; j += 1
+        modeldata = WRF400.loc[(WRF400['south_north']==j)&(WRF400['west_east']==i),['date','T2']].reset_index(drop=True)
+        if st == 0:
+            #print ('valley: ', modeldata['date'].iloc[41:], modeldata['T2'].iloc[41:])
+            valley_temp = modeldata['T2'].iloc[41:]
+        elif st == 12:
+            #print ('inlet: ', modeldata['date'].iloc[41:], modeldata['T2'].iloc[41:])
+            inlet_temp = modeldata['T2'].iloc[41:]
+        ax.plot   (modeldata['date']+pd.Timedelta(hours=2),modeldata['T2'],c=c[ci], alpha=1, zorder=10)
+        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),modeldata['T2'],c='w',ec=c[ci], alpha=1,label=f'{WRF400_label} {ln} (1 pt)',zorder=10)
+        ax.plot   (modeldata['date']+pd.Timedelta(hours=2),weighted[:],       c=c[ci], alpha=1, zorder=10)
+        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),weighted[:],       c='w',ec=c[ci],marker='s', alpha=1,label=f'{WRF400_label} {ln} (4 pts)',zorder=10)
+        #ax.plot(modeldata['date']+pd.Timedelta(hours=2),modeldata['T2'],c=c[st],ls='-', lw=lw2*1,alpha=1,label=f'{WRF400_label} {loc} (1 pt)',zorder=-9999)
+        #ax.plot(modeldata['date']+pd.Timedelta(hours=2),weighted,       c=c[st],ls='--',lw=lw2*1,alpha=1,label=f'{WRF400_label} {loc} (4 pts)',zorder=-9999)
+    
+    #for s,loc in zip(range(3),stations):
+    ax.set_xlim(start,end)
+    ax.set_xlabel('local time')
+    ax.set_xticks(ax.get_xticks(), ax.get_xticklabels(), rotation=45, ha='right')
+    ax.set_ylim(-6.5,13.5)#-18,23)#15)#10,19)#-20,10)#0,30)#-3,20)#
+    #ax.legend(loc='best', ncol=6, prop = { "size": 17}) #ncol=4
+    ax.grid(True,zorder=-99999)
+    
+    plt.tight_layout()
+    plt.savefig('plots/aws-wrf_temp.pdf')
+    
+#    f,ax = plt.subplots(figsize=(15,15))
+#    #ax = plotTimeSeries(data=MET_hourly,station_id=MET_hourly['station_id'].unique()[:-2],variable='ws')
+#    ax.set_ylabel('wind speed (m/s)')
+#    ax.scatter(NB['date'],NB['wspd_u'],s=s,c=c[9],ec='k',lw=lw,label='AWS glacier')
+#    #ax.scatter(SM['date'],SM['ws'],s=s,c=c[2],ec='k',lw=lw,label='AWS SM')
+#    ax.scatter(FF['date'],FF['WS'],s=s,c=c[1],ec='k',lw=lw,label='AWS inlet')
+#    ax.scatter(BH['date'],BH['ws'],s=s,c=c[5],ec='k',lw=lw,label='AWS valley2')
+#    #ax.plot(era5['time'],era5['ws'][:,era5_1000_j[0],era5_1000_i[0]],lw=4,alpha=.2,c='k',label=f'ERA5',zorder=-999)# {loc}')
+#    for st,loc,ln in zip([1,11,12],[stations[1]]+stations[-3:-1],[locnames[1]]+locnames[-3:-1]):#stations):
+#        if st == 0: # valley
+#            ci = 2
+#        if st == 1: # glacier
+#            ci = 9
+#        elif st == 11: # valley2
+#            ci = 5
+#        if st == 12: # inlet
+#            ci = 1
+#        elif st == 13: # outlet
+#            ci = 6
+#        lat = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'station_lat'].iloc[0]
+#        lon = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'station_lon'].iloc[0]
+#    #for st,loc in zip(range(3),stations[:3]):#3]):
+#    
+#        weighted = InverseDistanceWeighted(lat=lat,lon=lon,var='WS',data=WRF)
+#    #    np.save(f'WS_{loc}.npy', weighted)
+#        i,j = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_i'].unique()[0], WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_j'].unique()[0]
+#        modeldata = WRF.loc[(WRF['south_north']==j)&(WRF['west_east']==i),['date','WS']].reset_index(drop=True)
+#        ax.plot(modeldata['date']+pd.Timedelta(hours=2),modeldata['WS'],c=c[ci],ls='-', alpha=alp,zorder=10)
+#        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),modeldata['WS'],c='w',ec=c[ci],ls='-', alpha=alp,label=f'{WRF1000_label} {ln} (1 pt)',zorder=10)
+#    #    ax.plot(modeldata['date']+pd.Timedelta(hours=2),weighted,       c=c[ci],ls='--',alpha=alp,lw=lw2*1,label=f'{WRF1000_label} {loc} (4 pts)',zorder=-9999)
+#        
+#        weighted = InverseDistanceWeighted(lat=lat,lon=lon,var='WS',data=WRF400)
+#        i,j = WRF400_ts.loc[WRF400_ts['station_id']==loc,'grid_i'].unique()[0], WRF400_ts.loc[WRF400_ts['station_id']==loc,'grid_j'].unique()[0]
+#        #i,j = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_i'].unique()[0], WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_j'].unique()[0]
+#        modeldata = WRF400.loc[(WRF400['south_north']==j)&(WRF400['west_east']==i),['date','WS']].reset_index(drop=True)
+#        ax.plot   (modeldata['date']+pd.Timedelta(hours=2),modeldata['WS'],c=c[ci],ls='-', alpha=1,zorder=10)
+#        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),modeldata['WS'],c='w',ec=c[ci],ls='-', alpha=1,label=f'{WRF400_label} {ln} (1 pt)',zorder=10)
+#        ax.plot   (modeldata['date']+pd.Timedelta(hours=2),weighted,       c=c[ci],ls='-',alpha=1,zorder=10)
+#        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),weighted,       c='w',ec=c[ci],ls='-',alpha=1,marker='s',label=f'{WRF400_label} {ln} (4 pts)',zorder=10)
+#        
+#    ax.set_xlim(start,end)
+#    ax.set_ylim(0,12)
+#    ax.set_xticks(ax.get_xticks(), ax.get_xticklabels(), rotation=45, ha='right')
+#    handles1, labels1 = ax.get_legend_handles_labels()
+#    legend1 = ax.legend(handles1[:3], labels1[:3], ncol=1)
+#    #ax.legend(loc=1, ncol=1, prop = { "size": 18})
+#    ax.grid(True,zorder=-99999)
+#    ax.axvspan(xmin=datetime(2023,9,13), xmax=datetime(2023,9,14), ymin=0, ymax=1, facecolor='grey', alpha=0.1)
+#    
+#    f,ax = plt.subplots(figsize=(15,15))
+#    #ax = plotTimeSeries(data=MET_hourly,station_id=MET_hourly['station_id'].unique()[:-2],variable='wd')
+#    ax.set_ylabel('wind direction (\u00b0)')
+#    ax.scatter(NB['date'],NB['wdir_u'],s=s,c=c[9],ec='k',lw=lw,label='AWS glacier')
+#    #ax.scatter(SM['date'],SM['wd'],s=s,c=c[2],ec='k',lw=lw,label='AWS SM')
+#    ax.scatter(FF['date'],FF['WD'],s=s,c=c[1],ec='k',lw=lw,label='AWS inlet')
+#    ax.scatter(BH['date'],BH['wd'],s=s,c=c[5],ec='k',lw=lw,label='AWS valley2')
+#    #ax.scatter(era5['time'],era5['wd'][:,era5_1000_j[0],era5_1000_i[0]],marker='X',s=2*s,alpha=.2,c='k',label=f'ERA5',zorder=-999)# {loc}')
+#    for st,loc,ln in zip([1,11,12],[stations[1]]+stations[-3:-1],[locnames[1]]+locnames[-3:-1]):#stations):
+#        if st == 0: # valley
+#            ci = 2
+#        if st == 1: # glacier
+#            ci = 9
+#        elif st == 11: # valley2
+#            ci = 5
+#        if st == 12: # inlet
+#            ci = 1
+#        elif st == 13: # outlet
+#            ci = 6
+#    #for st,loc in zip(range(3),stations[:3]):#3]):#1,2 and 1:2
+#        #weighted = InverseDistanceWeighted(lat=lat,lon=lon,var='WD',data=WRF)
+#        i,j = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_i'].unique()[0], WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_j'].unique()[0]
+#        modeldata = WRF.loc[(WRF['south_north']==j)&(WRF['west_east']==i),['date','WD']].reset_index(drop=True)
+#        #ax.plot   (modeldata['date']+pd.Timedelta(hours=2),modeldata['WD'],c=c[ci],alpha=alp,zorder=-9999)
+#        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),modeldata['WD'],c='none',ec=c[ci],alpha=alp,label=f'{WRF1000_label} {ln} (1 pt)',zorder=10)
+#    #    np.save(f'WD_{loc}.npy', modeldata['WD'])
+#        #ax.scatter(modeldata['date']+pd.Timedelta(hours=2),weighted,c=c[st],label=f'WRF {loc} (4 pts)',zorder=-9999)
+#        
+#        #weighted = InverseDistanceWeighted(lat=lat,lon=lon,var='WD',data=WRF400)
+#        i,j = WRF400_ts.loc[WRF400_ts['station_id']==loc,'grid_i'].unique()[0], WRF400_ts.loc[WRF400_ts['station_id']==loc,'grid_j'].unique()[0]
+#        #i,j = WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_i'].unique()[0], WRF1000_ts.loc[WRF1000_ts['station_id']==loc,'grid_j'].unique()[0]
+#        modeldata = WRF400.loc[(WRF400['south_north']==j)&(WRF400['west_east']==i),['date','WD']].reset_index(drop=True)
+#        #ax.plot   (modeldata['date']+pd.Timedelta(hours=2),modeldata['WD'],c=c[ci],alpha=1,zorder=-9999)
+#        ax.scatter(modeldata['date']+pd.Timedelta(hours=2),modeldata['WD'],c='none',ec=c[ci],alpha=1,label=f'{WRF400_label} {ln} (1 pt)',zorder=10)
+#        #ax.scatter(modeldata['date']+pd.Timedelta(hours=2),weighted,c=c[st],label=f'WRF {loc} (4 pts)',zorder=-9999)
+#    
+#    #    if loc == 'NB':
+#    ax.set_xlim(start,end)
+#    ax.set_yticks(np.arange(0,361,90))
+#    ax.set_xticks(ax.get_xticks(), ax.get_xticklabels(), rotation=45, ha='right')
+#    
+#    handles1, labels1 = ax.get_legend_handles_labels()
+#    legend1 = ax.legend(handles1[:3], labels1[:3], ncol=1)#, columnspacing=0.8, loc='lower left')  
+#    #fig.add_artist(legend1)
+#    #ax.legend(loc=4, ncol=1, prop = { "size": 18})
+#    ax.grid(True,zorder=-99999)
+#    ax.axvspan(xmin=datetime(2023,9,13), xmax=datetime(2023,9,14), ymin=0, ymax=1, facecolor='grey', alpha=0.1)
+#    
+#    plt.show()
+
+
+
+# --------------------------------------------------------------------
+# plot wrf cross sections
+# --------------------------------------------------------------------
+
+xs = np.load('data/wrf_cross-sections/xs.npy')
+ys = np.load('data/wrf_cross-sections/ys.npy')
+ter_line = np.load('data/wrf_cross-sections/ter_line.npy')
+x_labels = np.load('data/wrf_cross-sections/xlabels.npy', allow_pickle=True)
+
+th_cross_warm = np.load('data/wrf_cross-sections/th_cross_warmlake_glac2019.npy')
+u_cross_warm  = np.load('data/wrf_cross-sections/u_cross_warmlake_glac2019.npy')
+v_cross_warm  = np.load('data/wrf_cross-sections/v_cross_warmlake_glac2019.npy')
+w_cross_warm  = np.load('data/wrf_cross-sections/w_cross_warmlake_glac2019.npy')
+u_tan_warm    = np.load('data/wrf_cross-sections/u_tan_warmlake_glac2019.npy')
+
+th_cross_cold = np.load('data/wrf_cross-sections/th_cross_coldlake_glac2019.npy')
+u_cross_cold  = np.load('data/wrf_cross-sections/u_cross_coldlake_glac2019.npy')
+v_cross_cold  = np.load('data/wrf_cross-sections/v_cross_coldlake_glac2019.npy')
+w_cross_cold  = np.load('data/wrf_cross-sections/w_cross_coldlake_glac2019.npy')
+u_tan_cold    = np.load('data/wrf_cross-sections/u_tan_coldlake_glac2019.npy')
+
+th_cross_2006 = np.load('data/wrf_cross-sections/th_cross_coldlake_glac2006.npy')
+u_cross_2006  = np.load('data/wrf_cross-sections/u_cross_coldlake_glac2006.npy')
+v_cross_2006  = np.load('data/wrf_cross-sections/v_cross_coldlake_glac2006.npy')
+w_cross_2006  = np.load('data/wrf_cross-sections/w_cross_coldlake_glac2006.npy')
+u_tan_2006    = np.load('data/wrf_cross-sections/u_tan_coldlake_glac2006.npy')
+
+
+class MidpointNormalize(mcolors.Normalize):
+    def __init__(self, vmin=None, vmax=None, vcenter=None, clip=False):
+        self.vcenter = vcenter
+        super().__init__(vmin, vmax, clip)
+
+    def __call__(self, value, clip=None):
+        # I'm ignoring masked values and all kinds of edge cases to make a
+        # simple example...
+        # Note also that we must extrapolate beyond vmin/vmax
+        x, y = [self.vmin, self.vcenter, self.vmax], [0, 0.5, 1.]
+        return np.ma.masked_array(np.interp(value, x, y,
+                                            left=-np.inf, right=np.inf))
+
+    def inverse(self, value):
+        y, x = [self.vmin, self.vcenter, self.vmax], [0, 0.5, 1]
+        return np.interp(value, x, y, left=-np.inf, right=np.inf)
+        
+
+# wind cross section ------------------------------------------------
+
+def plotWindCrossSection(var='ws'):
+    
+    plt.rcParams.update({'font.size': 22})
+    
+    fig, axs = plt.subplots(5,3, sharex=True, sharey=True, figsize=(18,25))
+    axs = axs.ravel()
+    
+    letters = ['a)','b)','c)','d)','e)','f)','g)','h)','i)','j)','k)','l)','m)','n)','o)']
+    
+    for t in range(15):
+        
+        thplot = axs[t].contour(xs, ys, th_cross_warm[t], linewidths=1,
+                                levels=np.arange(280,320,1), 
+                                colors='k')
+        axs[t].clabel(thplot,  thplot.levels[::2],
+                      inline=1, fmt='%1i', fontsize=10)
+        if var == 'ws':
+            variable = np.sqrt(u_cross_warm[t]**2+v_cross_warm[t]**2)
+            levels=np.arange(0,11)
+        elif var == 'w':
+            variable = w_cross_warm[t]
+            levels=np.arange(-3,3.1,.5)
+
+        tkec = axs[t].contourf(xs, ys, variable,
+                               levels=levels,
+                               extend='both', 
+                               cmap='viridis')#coolwarm')#
+        xint = 1; yint = 2; xints = 0; yints = 0
+        quiverplot = axs[t].quiver(xs[xints::xint], ys[yints::yint], 
+                                   u_tan_warm[t][yints::yint, xints::xint], w_cross_warm[t][yints::yint, xints::xint]*600,#75, 
+                                   angles='xy', pivot='mid', scale_units='xy', color='w', width=.005, scale=4, zorder=1000)#5.2
+        axs[t].quiver(0.6, 310, 10, 0, angles='xy', scale_units='xy', color='w', width=.005, scale=4, zorder=1000)
+        axs[t].text(0.6, 110, '10 m/s', color='w', fontsize=14, zorder=1000)
+        date = pd.to_datetime(wrf_str[t][-19:-9]+' '+wrf_str[t][-8:])+pd.Timedelta(hours=2)
+            
+        ht_fill = axs[t].fill_between(xs, 0, (ter_line), facecolor='k', zorder=10)
+        axs[t].set_ylim(0, 3000)
+        axs[t].plot([1,4.05],[1300,1100], c='w', ls='--', zorder=1000)
+        axs[t].plot([8.4,11],[800,620], c='w', ls='--', zorder=1000)
+        axs[t].text(4, 780, 'glacier', color='w', rotation=-28, fontsize=14, zorder=1000)
+        axs[t].text(19, 150, 'lake', color='w', rotation=0, fontsize=14, zorder=1000)
+    
+        x_ticks = np.arange(37)#cpairs.shape[0])
+        num_ticks = 4
+    
+        thin = int((len(x_ticks) / num_ticks) + .5)
+        axs[t].set_xticks(x_ticks[4::thin])
+        axs[t].set_xticklabels(x_labels[4::thin], fontsize=16, rotation=45)
+    
+        axs[12].set_xlabel(" ")#latitude, longitude")
+        axs[13].set_xlabel(" ")#latitude, longitude")
+        axs[14].set_xlabel(" ")#latitude, longitude")
+        axs[0].set_ylabel("altitude (m a.s.l.)")
+        axs[3].set_ylabel("altitude (m a.s.l.)")
+        axs[6].set_ylabel("altitude (m a.s.l.)")
+        axs[9].set_ylabel("altitude (m a.s.l.)")
+        axs[12].set_ylabel("altitude (m a.s.l.)")
+        let = letters[t]
+        axs[t].set_title(f'{let}      {str(date)[-11:-9]} Sept. {str(date)[-8:-3]} LT        ')#' (local time)')#'{wrf_str[t][11:21]} {wrf_str[t][22:-3]}')  #+2 local time
+        
+    fig.tight_layout()
+    plt.subplots_adjust(bottom=0.18)#, right=0.9, top=0.9)
+    cbar_ax = fig.add_axes([0.05, 0.1, 0.9, 0.02])
+    
+    formatter = LogFormatter(10, labelOnlyBase=False) 
+    if var == 'ws':
+        label = 'horizontal wind speed (m s$^{-1}$)'
+    elif var == 'w':
+        label = 'vertical wind speed (m s$^{-1}$)'
+    fig.colorbar(tkec, cax=cbar_ax,
+                 label=label, orientation='horizontal')
+                    
+    plt.subplots_adjust(wspace=0.04, hspace=0.2)
+    if var == 'ws':
+        plt.savefig('plots/wrf_wind.pdf')
+    elif var == 'w':
+        plt.savefig('plots/wrf_w.pdf')
+
+
+# sensitivity to lake temperature ------------------------------------------
+
+def plotLakeTempSensitivity(var='ws'):
+
+    # difference plot
+    
+    fig, axs = plt.subplots(1,2, sharex=True, sharey=True, figsize=(18,5.5))
+    axs = axs.ravel()
+    plt.rcParams.update({'font.size': 22})
+    
+    for t,let in zip([0,5],['c)','d)']):#'a)','b)']):#
+        
+        if var == 'ws':
+            diffvar = np.sqrt(u_cross_cold[t]**2+v_cross_cold[t]**2)-np.sqrt(u_cross_warm[t]**2+v_cross_warm[t]**2)
+            vmin = -3; vmax = 3
+            levels = np.arange(vmin,vmax+0.1,0.5)
+            label='difference in horizontal \n wind speed (m s$^{-1}$)'
+        elif var == 'w':
+            diffvar = w_cross_cold[t]-w_cross_warm[t]
+            vmin = -1.5; vmax = 1.5
+            levels = np.arange(vmin,vmax+.01,0.5)
+            label='difference in \n vertical velocity (m s$^{-1}$)'
+        
+        date = pd.to_datetime(wrf_str[t][-19:-9]+' '+wrf_str[t][-8:])+pd.Timedelta(hours=2)
+    
+        norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+        at = t
+        if t == 5:
+            at = 1
+    
+        thplot = axs[at].contour(xs, ys, th_cross_cold[t], linewidths=1,
+                                levels=np.arange(280,320,1), 
+                                colors='k')
+        axs[at].clabel(thplot,  thplot.levels[::2],
+                      inline=1, fmt='%1i', fontsize=10)
+        tkec = axs[at].contourf(xs, ys, diffvar,
+                               levels=levels,
+                               norm=colors.CenteredNorm(),
+                               extend='both',
+                               cmap='coolwarm')
+        
+        xint = 2; yint = 2; xints = 0; yints = 0
+        quiverplot = axs[at].quiver(xs[xints::xint], ys[yints::yint], 
+                                   u_tan_warm[t][yints::yint, xints::xint], (w_cross_warm[t][yints::yint, xints::xint])*500,#500 for along-valley, 200 for across-valley 
+                                   angles='xy', pivot='mid', scale_units='xy', color='grey', width=.005, scale=4, zorder=1000)#5.2
+        quiverplot = axs[at].quiver(xs[xints::xint], ys[yints::yint], 
+                                   u_tan_cold[t][yints::yint, xints::xint], (w_cross_cold[t][yints::yint, xints::xint])*500,#500 for along-valley, 200 for across-valley 
+                                   angles='xy', pivot='mid', scale_units='xy', color='w', width=.005, scale=4, zorder=1000)#5.2
+        
+        axs[at].quiver(0.6, 360, 10, 0, angles='xy', scale_units='xy', color='w', width=.005, scale=4, zorder=1000)
+        axs[at].text(0.6, 110, '10 m/s', color='w', fontsize=14, zorder=1000)
+           
+        ht_fill = axs[at].fill_between(xs, 0, (ter_line), facecolor='k', zorder=10)
+        axs[at].set_ylim(0, 3000)
+        axs[at].plot([1,3.95],[1300,1100], c='w', ls='--', zorder=1000)
+        axs[at].plot([8.1,11],[820,620], c='w', ls='--', zorder=1000)
+        axs[at].text(4.4, 830, 'glacier', color='w', rotation=-22, fontsize=14, zorder=1000)
+        axs[at].text(19, 150, 'lake', color='w', rotation=0, fontsize=14, zorder=1000)
+    
+    
+        x_ticks = np.arange(37)#cpairs.shape[0])
+        num_ticks = 4
+    
+        thin = int((len(x_ticks) / num_ticks) + .5)
+        axs[at].set_xticks(x_ticks[4::thin])
+        axs[at].set_xticklabels(x_labels[4::thin], fontsize=16, rotation=45)
+    
+        axs[0].set_ylabel("altitude (m a.s.l.)")
+        axs[at].set_title(f'{let}                 {str(date)[-11:-9]} Sept. {str(date)[-8:-3]} LT                    ')
+    
+    fig.tight_layout()
+    plt.subplots_adjust(bottom=0.26)
+    cbar_ax = fig.add_axes([1.0, 0.25, 0.01, 0.65])
+    
+    from matplotlib.ticker import LogFormatter 
+    formatter = LogFormatter(10, labelOnlyBase=False) 
+    import matplotlib.ticker as tkr
+    
+    cbar = fig.colorbar(tkec, cax=cbar_ax, orientation='vertical', format=tkr.FormatStrFormatter('%.1f'))#, rotation=270)#'horizontal')
+    cbar.ax.set_ylabel(label, rotation=270, labelpad=60)
+                               
+    plt.subplots_adjust(wspace=0.05, hspace=0.2)
+    
+    if var == 'ws':
+        plt.savefig('plots/wrf_ws_lake.pdf', bbox_inches="tight")
+    elif var == 'w':
+        plt.savefig('plots/wrf_w_lake.pdf', bbox_inches="tight")
+
+# sensitivity to glacier extent ------------------------------------------
+
+def plotGlacierSensitivity(var='ws'):
+
+    # difference plot
+    
+    fig, axs = plt.subplots(3,2, sharex=True, sharey=True, figsize=(16,15))
+    axs = axs.ravel()
+    plt.rcParams.update({'font.size': 22})
+    
+    for t,let in zip([0,1,5,6,13,14],['a)','b)','c)','d)','e)','f)']):
+
+
+
+        if var == 'ws':
+            diffvar = np.sqrt(u_cross_cold[t]**2+v_cross_cold[t]**2)-np.sqrt(u_cross_2006[t]**2+v_cross_2006[t]**2)
+            vmin = -3; vmax = 3
+            levels = np.arange(vmin,vmax+0.1,0.5)
+            label='difference in horizontal wind speed (m s$^{-1}$)'
+        elif var == 'w':
+            diffvar = w_cross_cold[t]-w_cross_2006[t]
+            vmin = -1.5; vmax = 1.5
+            levels = np.arange(vmin,vmax+.01,0.5)
+            label='difference in vertical velocity (m s$^{-1}$)'
+        
+        date = pd.to_datetime(wrf_str[t][-19:-9]+' '+wrf_str[t][-8:])+pd.Timedelta(hours=2)
+    
+        norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+        at = t
+        if t == 5:
+            at = 2
+        if t == 6:
+            at = 3
+        if t == 13:
+            at = 4
+        if t == 14:
+            at = 5
+    
+        thplot = axs[at].contour(xs, ys, th_cross_cold[t], linewidths=1,
+                                levels=np.arange(280,320,1), 
+                                colors='k')
+        axs[at].clabel(thplot,  thplot.levels[::2],
+                      inline=1, fmt='%1i', fontsize=10)
+        tkec = axs[at].contourf(xs, ys, diffvar,
+                               levels=levels,
+                               norm=colors.CenteredNorm(),
+                               extend='both',
+                               cmap='coolwarm')
+        
+        xint = 2; yint = 2; xints = 0; yints = 0
+        quiverplot = axs[at].quiver(xs[xints::xint], ys[yints::yint], 
+                                   u_tan_2006[t][yints::yint, xints::xint], (w_cross_2006[t][yints::yint, xints::xint])*500,#500 for along-valley, 200 for across-valley 
+                                   angles='xy', pivot='mid', scale_units='xy', color='grey', width=.005, scale=4, zorder=1000)#5.2
+        quiverplot = axs[at].quiver(xs[xints::xint], ys[yints::yint], 
+                                   u_tan_cold[t][yints::yint, xints::xint], (w_cross_cold[t][yints::yint, xints::xint])*500,#500 for along-valley, 200 for across-valley 
+                                   angles='xy', pivot='mid', scale_units='xy', color='w', width=.005, scale=4, zorder=1000)#5.2
+        
+        axs[at].quiver(0.6, 360, 10, 0, angles='xy', scale_units='xy', color='w', width=.005, scale=4, zorder=1000)
+        axs[at].text(0.6, 110, '10 m/s', color='w', fontsize=14, zorder=1000)
+          
+        ht_fill = axs[at].fill_between(xs, 0, (ter_line), facecolor='k', zorder=10)
+        axs[at].set_ylim(0, 3000)
+        axs[at].plot([1,3.95],[1300,1100], c='w', ls='--', zorder=1000)
+        axs[at].plot([8.1,11],[820,620], c='w', ls='--', zorder=1000)
+        axs[at].text(4.3, 800, 'glacier', color='w', rotation=-22, fontsize=14, zorder=1000)
+        axs[at].text(19, 150, 'lake', color='w', rotation=0, fontsize=14, zorder=1000)
+    
+        x_ticks = np.arange(37)
+        num_ticks = 4
+    
+        thin = int((len(x_ticks) / num_ticks) + .5)
+        axs[at].set_xticks(x_ticks[4::thin])
+        axs[at].set_xticklabels(x_labels[4::thin], fontsize=16, rotation=45)
+    
+        axs[4].set_xlabel("latitude, longitude")
+        axs[5].set_xlabel("latitude, longitude")
+        axs[0].set_ylabel("altitude (m a.s.l.)")
+        axs[2].set_ylabel("altitude (m a.s.l.)")
+        axs[4].set_ylabel("altitude (m a.s.l.)")
+        let = letters[at]
+        axs[at].set_title(f'{let}            {str(date)[-11:-9]} Sept. {str(date)[-8:-3]} LT                ')
+                    
+    plt.subplots_adjust(wspace=0.05, hspace=0.2)
+    #cbar_ax = fig.add_axes([0.05, 0.1, 0.9, 0.02])
+    cbar_ax = fig.add_axes([1.0, 0.12, 0.02, 0.83])
+    
+    from matplotlib.ticker import LogFormatter 
+    formatter = LogFormatter(10, labelOnlyBase=False) 
+    cbar = fig.colorbar(tkec, cax=cbar_ax, orientation='vertical')
+    cbar.ax.set_ylabel(label, rotation=270, labelpad=25)
+                
+    plt.tight_layout()
+
+    if var == 'ws':
+        plt.savefig('plots/wrf_ws_glacier.pdf', bbox_inches="tight")
+    elif var == 'w':
+        plt.savefig('plots/wrf_w_glacier.pdf', bbox_inches="tight")
+    
+
