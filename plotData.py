@@ -4,10 +4,13 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors
 import matplotlib.dates as mdates
 import matplotlib.gridspec as gridspec
+import matplotlib.pylab as pl
+import matplotlib.ticker as tkr
 from matplotlib.markers import MarkerStyle
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 from matplotlib.ticker import LogFormatter 
+from matplotlib.colors import ListedColormap
 
 import xarray as xr
 import geopandas as gpd
@@ -23,6 +26,8 @@ from scipy.ndimage import gaussian_filter
 from scipy import interpolate
 import geopy.distance
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, zoomed_inset_axes
+import cartopy.crs as ccrs   
+import cartopy.feature as cf 
 
 # CONTENTS
 
@@ -2646,9 +2651,7 @@ def plotLakeTempSensitivity(var='ws'):
     plt.subplots_adjust(bottom=0.26)
     cbar_ax = fig.add_axes([1.0, 0.25, 0.01, 0.65])
     
-    from matplotlib.ticker import LogFormatter 
-    formatter = LogFormatter(10, labelOnlyBase=False) 
-    import matplotlib.ticker as tkr
+    formatter = LogFormatter(10, labelOnlyBase=False)
     
     cbar = fig.colorbar(tkec, cax=cbar_ax, orientation='vertical', format=tkr.FormatStrFormatter('%.1f'))#, rotation=270)#'horizontal')
     cbar.ax.set_ylabel(label, rotation=270, labelpad=60)
@@ -2759,3 +2762,51 @@ def plotGlacierSensitivity(var='ws'):
         plt.savefig('plots/wrf_w_glacier.pdf', bbox_inches="tight")
     
 
+# --------------------------------------------------------------------
+# plot ERA5 data
+# --------------------------------------------------------------------
+
+def plotERA5():
+    
+    file = f"data/era5_sep2023.nc"
+    sld = xr.open_dataset(file)
+    
+    cmap = pl.cm.YlGn
+    my_cmap = cmap(np.arange(cmap.N))
+    my_cmap[:,-1] = np.insert(np.linspace(.7, 1, cmap.N-1),0,0)
+    my_cmap = ListedColormap(my_cmap)
+    
+    c = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    
+    lon,lat = np.meshgrid(sld['longitude'],sld['latitude'])
+    
+    plt.rcParams.update({'font.size': 20})
+    
+    for t,let in zip([0,1],['a)','b)']):
+        projection = ccrs.LambertConformal(central_longitude=10, central_latitude=55)
+        crs = ccrs.PlateCarree()
+        f = plt.figure(figsize=(16,9), dpi=120)
+        ax = plt.axes(projection=projection, frameon=True)
+    
+        lon_min = -17; lon_max = 27; lat_min = 51; lat_max = 71.5
+        
+        i = 10; j = 6
+    
+        cbar_kwargs = {'orientation':'horizontal', 'shrink':0.58, "pad" : .03, 'aspect':40, 'label':'wind speed (m/s)'}#total cloud cover'}#Total column water vapour (kg m$^{-2}$)'}#'Snow melt (mm of water equivalent)'}
+        cs = ax.contour(lon,lat,(sld["msl"][t]/100).values, transform=ccrs.PlateCarree(), colors='k', levels=np.arange(940, 1060, 5), linewidths=1, zorder=100)
+        (np.sqrt(sld["u10"][t]**2+sld["v10"][t]**2)).plot.contourf(ax=ax, transform=ccrs.PlateCarree(), cmap=my_cmap, cbar_kwargs=cbar_kwargs, 
+                                                                   levels=np.arange(4,21,2))#(0, 16, 1))#np.arange(0, 51, 5))
+        ax.barbs(lon[4::j,4::i],lat[4::j,4::i],sld['u10'][t].values[4::j,4::i]*1.94384,sld['v10'][t].values[4::j,4::i]*1.94384,
+                 length=5.5, transform=ccrs.PlateCarree(), color='k', zorder=1000)
+    
+        ax.add_feature(cf.OCEAN.with_scale("50m"), zorder=0, facecolor='gainsboro')
+        ax.add_feature(cf.LAND.with_scale("10m"), zorder=0, facecolor='white',edgecolor='grey')
+        ax.add_feature(cf.LAND.with_scale("10m"), zorder=10, facecolor='None', edgecolor='grey')
+    
+        ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=crs)
+        #plt.title(f"{sld['time'].values[t]}")#7. august 2023 kl 12:00")#{sld['time'].values[t]}")#{sl.tcwv[t].time.dt.strftime('%d %B %Y %H:%M').values}")#\n2 m temperature (colours) and snow melt (contours at 1, 2 mm/h)")
+        plt.title(f"{let}        {str(sld['time'].values[t])[8:10]+' September 2023, '+str(sld['time'].values[t])[11:16]}         ")
+        ax.scatter(7.211611010507808, 61.675952354678884,s=300,marker='X',c=c[1],ec='None',transform=ccrs.PlateCarree(),zorder=2000)
+    
+        plt.savefig(f"plots/winds_{str(sld['time'].values[t])[:13]}.pdf", dpi=100, format="pdf", bbox_inches='tight')
+        plt.show()
