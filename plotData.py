@@ -1441,7 +1441,7 @@ def interpolateUAV_p1(ind1=0, ind2=2, day='13'):
         print (f'location of radiosonde below {max_height}')
         ax.scatter(RS2.loc[:RS2_ind,'lon'], RS2.loc[:RS2_ind,'lat'], c='y', marker='^', s=10)
     
-    #plt.savefig(f'data/interpolation/figures/map_{t[:5]}.png')
+    #plt.savefig(f'plots/map_{t[:5]}.png')
     
     # find surface altitude of each coordinate on interpolation line
     try:
@@ -1630,7 +1630,7 @@ def interpolateUAV_p2(var='t', date=date, pt_contours=None):
     ax2.set_title(f'{date} smoothed')
     ax2.legend(loc='best')
     
-    #plt.savefig(f'data/interpolation/figures/profiles_{var}_{t[:5]}.png')
+    #plt.savefig(f'plots/profiles_{var}_{t[:5]}.png')
     
     z_dist = []
     for i in range(len(processed_dfs)):
@@ -2084,9 +2084,9 @@ def interpolateUAV_p2(var='t', date=date, pt_contours=None):
     
     
     plt.tight_layout()
-    #plt.savefig(f'data/interpolation/figures/colorbar.png')
+    #plt.savefig(f'plots/colorbar.png')
     if var == 't':
-        plt.savefig(f'data/interpolation/figures/{var}_{t[:5]}_linear.pdf')
+        plt.savefig(f'plots/{var}_{t[:5]}_linear.pdf')
         plt.show()
 
     elif var=='pt':
