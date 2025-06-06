@@ -195,7 +195,7 @@ path = 'data/AWS/'
 # data from Steinmannen
 #filename = 'SM.xlsx'
 #SM = pd.read_excel(path+filename)
-#SM = (SM.replace(' ', np.NaN,regex=True))
+#SM = (SM.replace(' ', np.nan,regex=True))
 #SM = SM.rename(columns={'Unnamed: 0': 'date', 'Jost-Steinmann\nen...-T0008A3R\n-0119\n[W/m2]': 'SW_in', 'Jost-Steinmann\nen...-T0014A3K\nI0113\n[Grader]': 'WD', 'Jost-Steinmann\nen...-T0014A3K\nI0113\n[Grader]\norig': 'WD_orig', 'Jost-Steinmann\nen...-T0015A3K\nI0120\n[m/sek]': 'WS', 'Jost-Steinmann\nen...-T0015A3K\nI0120\n[m/sek]\norig': 'WS_orig', 'Jost-Steinmann\nen...-T0017A3K\nI0114\n[Grader C.]': 'T', 'Jost-Steinmann\nen...-T0017A3K\nI0114\n[Grader C.]\norig': 'T_orig'})
 #for i in range(len(SM['date'])):
 #    try:
@@ -215,7 +215,7 @@ path = 'data/AWS/'
 # data from Bjørkehaugen
 filename = 'Statkraft.xlsx'
 BH = pd.read_excel(path+filename, usecols="A:B,G:H,J")
-BH = (BH.replace(' ', np.NaN,regex=True))
+BH = (BH.replace(' ', np.nan,regex=True))
 
 BH = BH.rename(columns={BH.columns[0]: 'date', BH.columns[1]: 'prec', BH.columns[2]: 'wd', BH.columns[3]: 'ws', BH.columns[4]: 't'})#, 'Jost-Steinmann\nen...-T0008A3R\n-0119\n[W/m2]': 'SW_in', 'Jost-Steinmann\nen...-T0014A3K\nI0113\n[Grader]': 'WD', 'Jost-Steinmann\nen...-T0014A3K\nI0113\n[Grader]\norig': 'WD_orig', 'Jost-Steinmann\nen...-T0015A3K\nI0120\n[m/sek]': 'WS', 'Jost-Steinmann\nen...-T0015A3K\nI0120\n[m/sek]\norig': 'WS_orig', 'Jost-Steinmann\nen...-T0017A3K\nI0114\n[Grader C.]': 'T', 'Jost-Steinmann\nen...-T0017A3K\nI0114\n[Grader C.]\norig': 'T_orig'})
 for i in range(len(BH['date'])):
@@ -244,7 +244,7 @@ BH.loc[BH['hour']!=6, 'prec_day'] = np.nan
 # data from Nigardsvatn
 filename = 'Statkraft.xlsx'
 NV = pd.read_excel(path+filename, usecols="A,M")
-NV = (NV.replace(' ', np.NaN,regex=True))
+NV = (NV.replace(' ', np.nan,regex=True))
 
 NV = NV.rename(columns={NV.columns[0]: 'date', NV.columns[1]: 't'})
 for i in range(len(NV['date'])):
@@ -427,9 +427,10 @@ fns = glob.glob(path+'*{}'.format(extension))
 
 ttFF = pd.DataFrame()
 for fn in sorted(fns)[:]:
+    print (fn[17:20])
     tt = pd.DataFrame(pd.read_excel(fn, usecols="B,C")[4:])
-    ttFF['date_'+fn[12:15]] = tt['Time']#+pd.Timedelta(hours=2) # convert to local summer time
-    ttFF['t_'+fn[12:15]] = tt[1]
+    ttFF['date_'+fn[17:20]] = tt['Time']#+pd.Timedelta(hours=2) # convert to local summer time
+    ttFF['t_'+fn[17:20]] = tt[1]
 
 # read tinytag data from glacier
 path = 'data/tinytags/NB/'
@@ -444,13 +445,13 @@ for fn in sorted(fns)[:]:
     ttNB['date_'+fn[17:20]] = tt['Time']#+pd.Timedelta(hours=2) # convert to local summer time
     ttNB['t_'+fn[17:20]] = tt[1]
 
-# read tinytag data from paraglider
-path = 'data/paraglider/'
-extension = '.xlsx'
-tt = pd.DataFrame(pd.read_excel(path+'hauganosi_temp'+extension)[['Time adjusted to phone time',1,'interpolated altitude']][4:])
-tt = tt.rename({'Time adjusted to phone time': 'date', 1: 'temperature', 'interpolated altitude': 'altitude'}, axis='columns')
-tt = tt.loc[tt['altitude']>0]
-#tt['date'] += pd.Timedelta(hours=2) # convert to local summer time
+## read tinytag data from paraglider
+#path = 'data/paraglider/'
+#extension = '.csv'
+#tt = pd.DataFrame(pd.read_excel(path+'paraglider'+extension)[['time','temperature','Altitude (m)']][4:])
+#tt = tt.rename({'time': 'date', 'Altitude (m)': 'altitude'}, axis='columns')
+#tt = tt.loc[tt['altitude']>0]
+##tt['date'] += pd.Timedelta(hours=2) # convert to local summer time
 
 # tinytag meta data
 ttFF_waterdist = [105,199,29,5,20,33,162,27,80] # NB! only horizontal, doesn't account for elevation (HOBO: 77)
